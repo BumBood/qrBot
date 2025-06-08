@@ -1,0 +1,9 @@
+aiogram
+python-dotenv
+sqlalchemy
+asyncpg
+alembic
+httpx
+opencv-python
+pyzbar
+numpy

@@ -48,7 +48,7 @@ from logger import logger
 # Регулярное выражение для проверки формата данных чека
 FN_PATTERN = r"^\d{16}$|^\d{17}$"  # 16 или 17 цифр
 FD_PATTERN = r"^\d{1,6}$"  # от 1 до 6 цифр
-FPD_PATTERN = r"^\d{1,10}$"  # от 1 до 10 цифр
+FPD_PATTERN = r"^\d{1,15}$"  # от 1 до 15 цифр (расширил лимит)
 
 # Регулярное выражение для извлечения данных из QR-кода
 QR_PATTERN = r"t=(?P<date>\d{8}T\d{6})&s=(?P<amount>[\d.]+)&fn=(?P<fn>\d+)&i=(?P<fd>\d+)&fp=(?P<fpd>\d+)"
@@ -76,18 +76,26 @@ async def process_receipt_photo(user_id: int, photo_file_path: str) -> dict:
 
         if api_result["success"] and api_result.get("data"):
             # Извлекаем данные из ответа API
-            check_data = api_result["data"]
+            api_data = api_result["data"]
+            check_data = api_data.get("json", {})
+
+            logger.info(
+                f"Извлекаю данные из API ответа: fiscalDriveNumber={check_data.get('fiscalDriveNumber')}, fiscalDocumentNumber={check_data.get('fiscalDocumentNumber')}, fiscalSign={check_data.get('fiscalSign')}, totalSum={check_data.get('totalSum')}"
+            )
 
             # Получаем необходимые данные
-            fn = check_data.get("fn", "")
-            fd = check_data.get("fiscalDocumentNumber", "")
-            fpd = check_data.get("fiscalSign", "")
+            fn = str(check_data.get("fiscalDriveNumber", ""))
+            fd = str(check_data.get("fiscalDocumentNumber", ""))
+            fpd = str(check_data.get("fiscalSign", ""))
             amount = (
                 float(check_data.get("totalSum", 0)) / 100
             )  # Сумма в копейках, переводим в рубли
 
             # Проверяем формат данных
             if not validate_receipt_data(fn, fd, fpd, amount):
+                logger.error(
+                    f"Ошибка валидации данных: fn={fn}, fd={fd}, fpd={fpd}, amount={amount}"
+                )
                 raise ReceiptValidationError("Неверный формат данных чека")
 
             return {"success": True, "fn": fn, "fd": fd, "fpd": fpd, "amount": amount}
@@ -119,18 +127,26 @@ async def process_receipt_photo(user_id: int, photo_file_path: str) -> dict:
 
             if api_result["success"] and api_result.get("data"):
                 # Извлекаем данные из ответа API
-                check_data = api_result["data"]
+                api_data = api_result["data"]
+                check_data = api_data.get("json", {})
+
+                logger.info(
+                    f"Извлекаю данные из API ответа (второй вызов): fiscalDriveNumber={check_data.get('fiscalDriveNumber')}, fiscalDocumentNumber={check_data.get('fiscalDocumentNumber')}, fiscalSign={check_data.get('fiscalSign')}, totalSum={check_data.get('totalSum')}"
+                )
 
                 # Получаем необходимые данные
-                fn = check_data.get("fn", "")
-                fd = check_data.get("fiscalDocumentNumber", "")
-                fpd = check_data.get("fiscalSign", "")
+                fn = str(check_data.get("fiscalDriveNumber", ""))
+                fd = str(check_data.get("fiscalDocumentNumber", ""))
+                fpd = str(check_data.get("fiscalSign", ""))
                 amount = (
                     float(check_data.get("totalSum", 0)) / 100
                 )  # Сумма в копейках, переводим в рубли
 
                 # Проверяем формат данных
                 if not validate_receipt_data(fn, fd, fpd, amount):
+                    logger.error(
+                        f"Ошибка валидации данных (второй вызов): fn={fn}, fd={fd}, fpd={fpd}, amount={amount}"
+                    )
                     raise ReceiptValidationError("Неверный формат данных чека")
 
                 return {
@@ -179,18 +195,27 @@ def validate_receipt_data(fn: str, fd: str, fpd: str, amount: float) -> bool:
     Returns:
         bool: True, если формат данных корректный, иначе False
     """
+    logger.info(
+        f"Валидация данных чека: fn='{fn}' (len={len(fn)}), fd='{fd}' (len={len(fd)}), fpd='{fpd}' (len={len(fpd)}), amount={amount}"
+    )
+
     if not re.match(FN_PATTERN, fn):
+        logger.error(f"ФН не соответствует паттерну {FN_PATTERN}: '{fn}'")
         return False
 
     if not re.match(FD_PATTERN, fd):
+        logger.error(f"ФД не соответствует паттерну {FD_PATTERN}: '{fd}'")
         return False
 
     if not re.match(FPD_PATTERN, fpd):
+        logger.error(f"ФПД не соответствует паттерну {FPD_PATTERN}: '{fpd}'")
         return False
 
     if amount <= 0:
+        logger.error(f"Сумма должна быть больше 0: {amount}")
         return False
 
+    logger.info("Все поля прошли валидацию успешно")
     return True
 
 
@@ -355,9 +380,10 @@ async def verify_receipt_with_api(session: AsyncSession, receipt_id: int) -> dic
 
         # Обрабатываем данные из API ответа
         api_data = api_result.get("data", {})
+        check_data = api_data.get("json", {})
 
         # Если в ответе есть информация о товарах, анализируем ее
-        items_data = api_data.get("items", [])
+        items_data = check_data.get("items", [])
         aisida_count = 0
 
         if items_data:
@@ -374,11 +400,11 @@ async def verify_receipt_with_api(session: AsyncSession, receipt_id: int) -> dic
             )
 
         # Если в ответе есть информация о магазине, сохраняем ее
-        retail_place = api_data.get("retailPlace")
+        retail_place = check_data.get("retailPlaceAddress")
         if retail_place:
             receipt.pharmacy = retail_place
 
-            # Сохраняем изменения
+        # Сохраняем изменения
         await session.commit()
 
         # Проверяем что статус действительно изменился

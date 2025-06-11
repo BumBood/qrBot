@@ -7,7 +7,10 @@
 import asyncio
 import os
 from sqlalchemy.ext.asyncio import AsyncSession
-from database import engine
+from database import engine, Base
+
+# Импортируем все модели, чтобы SQLAlchemy знал о таблицах
+from models import User, Receipt, Prize, WeeklyLottery, Promocode
 from services.promocode_service import promocode_service
 from logger import logger
 
@@ -17,6 +20,12 @@ async def migrate_promocodes_from_files():
     Мигрирует промокоды из файлов в базу данных
     """
     try:
+        # Сначала создаем таблицы, если их нет
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+        logger.info("Проверили создание таблиц в БД")
+
         async with AsyncSession(engine) as session:
             promocodes_200_file = "data/promocodes/promocodes_200.txt"
             promocodes_500_file = "data/promocodes/promocodes_500.txt"

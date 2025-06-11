@@ -9,6 +9,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import BOT_TOKEN
 from database import engine, Base, get_session
+
+# Импортируем все модели, чтобы SQLAlchemy создал таблицы
+from models import User, Receipt, Prize, WeeklyLottery, Promocode
 from handlers import (
     register_base_handlers,
     register_registration_handlers,

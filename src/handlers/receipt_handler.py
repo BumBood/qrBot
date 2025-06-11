@@ -150,14 +150,22 @@ async def process_photo(message: Message, state: FSMContext, session: AsyncSessi
         )
 
         if not verify_result["success"]:
-            # Чек невалиден — отдельное сообщение с кнопками
+            # Чек отклонен - выводим подробную информацию
+            error_message = verify_result.get("error", "Неизвестная ошибка")
+
             builder = InlineKeyboardBuilder()
             builder.button(text="Попробовать снова", callback_data="receipt_photo")
+            builder.button(text="Ввести данные вручную", callback_data="receipt_manual")
             builder.button(text="Назад в меню", callback_data="main_menu")
             builder.adjust(1)
+
             await wait_msg.edit_text(
-                "К сожалению, этот чек не прошёл проверку.\nПроверьте данные и попробуйте снова.",
+                f"❌ <b>Чек отклонен</b>\n\n"
+                f"Причина: {error_message}\n\n"
+                f"Проверьте правильность данных чека и попробуйте снова. "
+                f"Статус чека автоматически изменен на 'отклонен'.",
                 reply_markup=builder.as_markup(),
+                parse_mode="HTML",
             )
             await state.clear()
             return
@@ -321,10 +329,14 @@ async def process_manual_entry(
         )
 
         if not verify_result["success"]:
+            error_message = verify_result.get("error", "Неизвестная ошибка")
             await wait_msg.edit_text(
-                f"❌ Не удалось проверить чек: {verify_result.get('error', 'Неизвестная ошибка')}\n"
-                f"Пожалуйста, попробуйте еще раз или пришлите фото чека.",
+                f"❌ <b>Чек отклонен</b>\n\n"
+                f"Причина: {error_message}\n\n"
+                f"Статус чека автоматически изменен на 'отклонен'. "
+                f"Пожалуйста, проверьте данные и попробуйте еще раз.",
                 reply_markup=get_manual_entry_keyboard(),
+                parse_mode="HTML",
             )
             await state.clear()
             return
@@ -415,8 +427,10 @@ async def callback_my_receipts(
                 status_text += f", подарок: промокод {receipt.prize_value} ₽"
         elif receipt.status == "pending":
             status_text = "Ожидает проверки"
-        elif receipt.status == "declined":
-            status_text = "Отклонён"
+        elif receipt.status == "rejected":
+            status_text = "Отклонён ❌"
+        else:
+            status_text = "Неизвестный статус"
 
         receipts_text += (
             f"{i}. № {receipt.id} ({receipt.created_at.strftime('%d.%m.%Y')}) — "
@@ -488,25 +502,41 @@ async def process_receipt_number(
         return
 
     status_text = ""
+    status_emoji = ""
     if receipt.status == "verified":
-        status_text = f"Подтверждён ✅"
+        status_text = "Подтверждён"
+        status_emoji = "✅"
     elif receipt.status == "pending":
         status_text = "Ожидает проверки"
-    elif receipt.status == "declined":
+        status_emoji = "⏳"
+    elif receipt.status == "rejected":
         status_text = "Отклонён"
+        status_emoji = "❌"
+    else:
+        status_text = "Неизвестный статус"
+        status_emoji = "❓"
 
-    prize_info = ""
-    if receipt.prize_code:
-        prize_info = (
-            f"\n• Подарок: промокод {receipt.prize_value} ₽ ({receipt.prize_code})"
+    # Формируем подробную информацию о чеке
+    verification_info = ""
+    if receipt.verification_date:
+        verification_info = (
+            f" (проверен {receipt.verification_date.strftime('%d.%m.%Y %H:%M')})"
         )
 
     receipt_details_text = (
-        f"<b>Регистрация № {receipt.id} ({receipt.created_at.strftime('%d.%m.%Y')}):</b>\n"
-        f"• Аптека: {receipt.pharmacy_name if receipt.pharmacy_name else 'Неизвестно'}, ул. {receipt.pharmacy_address if receipt.pharmacy_address else 'Неизвестно'}, {receipt.pharmacy_city if receipt.pharmacy_city else 'Неизвестно'}\n"
-        f"• Товар: {receipt.product_name if receipt.product_name else 'Неизвестно'}\n"
-        f"• Статус: {status_text}{prize_info}\n"
+        f"<b>Регистрация № {receipt.id}</b>\n\n"
+        f"📅 Дата регистрации: {receipt.created_at.strftime('%d.%m.%Y %H:%M')}\n"
+        f"💰 Сумма: {receipt.amount} ₽\n"
+        f"🏪 Аптека: {receipt.pharmacy if receipt.pharmacy else 'Не указана'}\n"
+        f"📦 Найдено товаров «Айсида»: {receipt.items_count}\n\n"
+        f"📋 Статус: {status_emoji} <b>{status_text}</b>{verification_info}\n"
     )
+
+    # Добавляем информацию о подарке, если есть
+    # Ищем связанный подарок через модель Prize (если она существует)
+    # Пока оставим базовую проверку
+    if receipt.status == "verified" and receipt.items_count > 0:
+        receipt_details_text += f"\n🎁 За этот чек вы получили подарок!"
 
     await message.answer(
         receipt_details_text,

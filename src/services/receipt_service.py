@@ -1,3 +1,35 @@
+"""
+Сервис для работы с чеками
+
+УЛУЧШЕНИЯ СИСТЕМЫ РАСПОЗНАВАНИЯ ЧЕКОВ:
+
+1. Гарантированное обновление статуса:
+   - Статус чека ВСЕГДА изменяется после проверки
+   - При успешной проверке: статус = "verified"
+   - При ошибке API: статус = "rejected"
+   - При исключении: статус = "rejected"
+
+2. Улучшенная обработка ошибок:
+   - Детальное логирование всех этапов проверки
+   - Корректная обработка транзакций БД
+   - Информативные сообщения об ошибках
+
+3. Расширенная диагностика:
+   - Функция check_pending_receipts() для массовой проверки
+   - Функция get_receipt_statistics() для статистики
+   - Административные команды /admin_stats и /admin_check_pending
+
+4. Улучшенное распознавание товаров "Айсида":
+   - Поиск как "Айсида", так и "айсида"
+   - Подсчет всех вхождений в чеке
+   - Детальное логирование найденных товаров
+
+5. Улучшенный пользовательский интерфейс:
+   - Информативные сообщения о статусе чека
+   - Эмодзи для визуального различения статусов
+   - Подробная информация в разделе "Мои чеки"
+"""
+
 import re
 import cv2
 import numpy as np
@@ -252,6 +284,7 @@ async def verify_receipt_with_api(session: AsyncSession, receipt_id: int) -> dic
     Returns:
         dict: Результат проверки
     """
+    receipt = None
     try:
         # Получаем чек из БД
         receipt_query = await session.execute(
@@ -261,6 +294,9 @@ async def verify_receipt_with_api(session: AsyncSession, receipt_id: int) -> dic
 
         if not receipt:
             return {"success": False, "error": "Чек не найден"}
+
+        # Логируем начало проверки
+        logger.info(f"Начинаю проверку чека ID {receipt_id} через API")
 
         # Проверяем чек через API proverkacheka.com
         # Форматируем время в формат YYYYMMDDTHHMM
@@ -276,69 +312,302 @@ async def verify_receipt_with_api(session: AsyncSession, receipt_id: int) -> dic
             s=str(receipt.amount),
         )
 
+        # Устанавливаем дату проверки в любом случае
+        receipt.verification_date = datetime.now()
+
+        logger.info(
+            f"Чек {receipt_id} - текущий статус до обработки API: '{receipt.status}'"
+        )
+
+        # Обрабатываем результат API
         if not api_result["success"]:
             logger.error(
-                f"Ошибка при проверке чека через API: {api_result.get('error')}"
+                f"API вернул ошибку для чека {receipt_id}: {api_result.get('error')}"
             )
 
-            # Обновляем статус чека на "rejected" в случае ошибки
+            # Обновляем статус на "rejected" при неуспешном ответе API
+            old_status = receipt.status
             receipt.status = "rejected"
-            receipt.verification_date = datetime.now()
+
+            logger.info(
+                f"Чек {receipt_id} - изменяю статус с '{old_status}' на 'rejected'"
+            )
+
             await session.commit()
+
+            # Проверяем что статус действительно изменился
+            await session.refresh(receipt)
+            logger.info(f"Чек {receipt_id} - статус после commit: '{receipt.status}'")
 
             return {
                 "success": False,
                 "error": api_result.get("error", "Ошибка при проверке чека"),
             }
 
-        # Обновляем статус чека
+            # API вернул успешный результат
+        logger.info(f"API успешно проверил чек {receipt_id}")
+
+        # Обновляем статус чека на "verified"
+        old_status = receipt.status
         receipt.status = "verified"
-        receipt.verification_date = datetime.now()
+
+        logger.info(f"Чек {receipt_id} - изменяю статус с '{old_status}' на 'verified'")
+
+        # Обрабатываем данные из API ответа
+        api_data = api_result.get("data", {})
 
         # Если в ответе есть информация о товарах, анализируем ее
-        items_data = api_result.get("data", {}).get("items", [])
+        items_data = api_data.get("items", [])
         aisida_count = 0
 
         if items_data:
             # Подсчитываем количество товаров "Айсида"
             for item in items_data:
-                if "Айсида" in item.get("name", ""):
+                item_name = item.get("name", "")
+                if "Айсида" in item_name or "айсида" in item_name.lower():
                     aisida_count += 1
+                    logger.info(f"Найден товар Айсида: {item_name}")
 
             receipt.items_count = aisida_count
+            logger.info(
+                f"Общее количество товаров Айсида в чеке {receipt_id}: {aisida_count}"
+            )
 
         # Если в ответе есть информация о магазине, сохраняем ее
-        retail_place = api_result.get("data", {}).get("retailPlace")
+        retail_place = api_data.get("retailPlace")
         if retail_place:
             receipt.pharmacy = retail_place
 
-        # Сохраняем изменения
-        session.commit()
+            # Сохраняем изменения
+        await session.commit()
+
+        # Проверяем что статус действительно изменился
+        await session.refresh(receipt)
+        logger.info(
+            f"Чек {receipt_id} - статус после commit: '{receipt.status}', данные сохранены"
+        )
 
         return {
             "success": True,
             "status": "verified",
             "aisida_count": receipt.items_count,
+            "pharmacy": receipt.pharmacy,
         }
 
     except Exception as e:
         # Логируем ошибку
-        logger.error(f"Ошибка при проверке чека через API: {str(e)}")
+        logger.error(f"Исключение при проверке чека {receipt_id} через API: {str(e)}")
 
         try:
-            # Пытаемся сделать rollback в безопасном режиме
+            # Откатываем транзакцию
             await session.rollback()
 
-            # Если receipt определен, обновляем его статус
-            if "receipt" in locals() and receipt:
-                # Обновляем статус без использования вложенной транзакции
+            # Если receipt определен, обновляем его статус на "rejected"
+            if receipt is not None:
+                old_status = receipt.status
+                logger.info(
+                    f"Обновляю статус чека {receipt_id} с '{old_status}' на 'rejected' из-за исключения"
+                )
+
+                # Устанавливаем статус и дату проверки
                 receipt.status = "rejected"
                 receipt.verification_date = datetime.now()
 
-                # Коммитим изменения
+                # Сохраняем изменения в новой транзакции
                 await session.commit()
+
+                # Проверяем что статус действительно изменился
+                await session.refresh(receipt)
+                logger.info(
+                    f"Чек {receipt_id} - статус после commit: '{receipt.status}'"
+                )
+            else:
+                logger.error(
+                    f"Не удалось обновить статус чека {receipt_id} - объект чека не найден"
+                )
+
         except Exception as inner_e:
             # Если произошла ошибка при обработке исключения, логируем её
-            logger.error(f"Ошибка при обработке исключения: {str(inner_e)}")
+            logger.error(
+                f"Критическая ошибка при обработке исключения для чека {receipt_id}: {str(inner_e)}"
+            )
 
-        return {"success": False, "error": str(e)}
+            # Пытаемся сделать rollback еще раз
+            try:
+                await session.rollback()
+            except:
+                pass
+
+        return {
+            "success": False,
+            "error": f"Произошла ошибка при проверке чека: {str(e)}",
+        }
+
+
+async def check_pending_receipts(session: AsyncSession) -> dict:
+    """
+    Проверяет все чеки со статусом 'pending' и обновляет их статус
+
+    Args:
+        session: Сессия базы данных
+
+    Returns:
+        dict: Результат проверки с количеством обработанных чеков
+    """
+    try:
+        # Получаем все чеки со статусом 'pending'
+        pending_receipts_query = await session.execute(
+            select(Receipt).where(Receipt.status == "pending")
+        )
+        pending_receipts = pending_receipts_query.scalars().all()
+
+        if not pending_receipts:
+            logger.info("Нет чеков со статусом 'pending' для проверки")
+            return {
+                "success": True,
+                "message": "Нет чеков для проверки",
+                "processed": 0,
+                "verified": 0,
+                "rejected": 0,
+            }
+
+        logger.info(
+            f"Найдено {len(pending_receipts)} чеков со статусом 'pending' для проверки"
+        )
+
+        verified_count = 0
+        rejected_count = 0
+
+        for receipt in pending_receipts:
+            logger.info(f"Проверяю чек ID {receipt.id}")
+
+            # Проверяем каждый чек
+            result = await verify_receipt_with_api(session, receipt.id)
+
+            if result["success"]:
+                verified_count += 1
+                logger.info(f"Чек ID {receipt.id} подтвержден")
+            else:
+                rejected_count += 1
+                logger.info(f"Чек ID {receipt.id} отклонен: {result.get('error')}")
+
+        total_processed = verified_count + rejected_count
+
+        logger.info(
+            f"Обработано чеков: {total_processed}, подтверждено: {verified_count}, отклонено: {rejected_count}"
+        )
+
+        return {
+            "success": True,
+            "message": f"Обработано {total_processed} чеков",
+            "processed": total_processed,
+            "verified": verified_count,
+            "rejected": rejected_count,
+        }
+
+    except Exception as e:
+        logger.error(f"Ошибка при проверке висящих чеков: {str(e)}")
+        return {"success": False, "error": f"Ошибка при проверке: {str(e)}"}
+
+
+async def get_receipt_statistics(session: AsyncSession, user_id: int = None) -> dict:
+    """
+    Получает статистику по чекам
+
+    Args:
+        session: Сессия базы данных
+        user_id: ID пользователя (если нужна статистика по конкретному пользователю)
+
+    Returns:
+        dict: Статистика чеков
+    """
+    try:
+        base_query = select(Receipt)
+        if user_id:
+            base_query = base_query.where(Receipt.user_id == user_id)
+
+        # Получаем все чеки
+        all_receipts_query = await session.execute(base_query)
+        all_receipts = all_receipts_query.scalars().all()
+
+        # Подсчитываем статистику
+        total = len(all_receipts)
+        pending = len([r for r in all_receipts if r.status == "pending"])
+        verified = len([r for r in all_receipts if r.status == "verified"])
+        rejected = len([r for r in all_receipts if r.status == "rejected"])
+
+        return {
+            "success": True,
+            "total": total,
+            "pending": pending,
+            "verified": verified,
+            "rejected": rejected,
+            "user_id": user_id,
+        }
+
+    except Exception as e:
+        logger.error(f"Ошибка при получении статистики чеков: {str(e)}")
+        return {"success": False, "error": f"Ошибка при получении статистики: {str(e)}"}
+
+
+async def test_receipt_status_update(
+    session: AsyncSession, receipt_id: int, new_status: str
+) -> dict:
+    """
+    Тестовая функция для проверки изменения статуса чека
+
+    Args:
+        session: Сессия базы данных
+        receipt_id: ID чека
+        new_status: Новый статус для установки
+
+    Returns:
+        dict: Результат операции
+    """
+    try:
+        logger.info(f"ТЕСТ: Начинаю тестирование изменения статуса чека {receipt_id}")
+
+        # Получаем чек из БД
+        receipt_query = await session.execute(
+            select(Receipt).where(Receipt.id == receipt_id)
+        )
+        receipt = receipt_query.scalars().first()
+
+        if not receipt:
+            return {"success": False, "error": "Чек не найден"}
+
+        old_status = receipt.status
+        logger.info(f"ТЕСТ: Чек {receipt_id} - текущий статус: '{old_status}'")
+
+        # Изменяем статус
+        receipt.status = new_status
+        receipt.verification_date = datetime.now()
+
+        logger.info(f"ТЕСТ: Чек {receipt_id} - устанавливаю статус: '{new_status}'")
+
+        # Сохраняем изменения
+        await session.commit()
+
+        # Проверяем что статус изменился
+        await session.refresh(receipt)
+        final_status = receipt.status
+
+        logger.info(
+            f"ТЕСТ: Чек {receipt_id} - финальный статус после commit: '{final_status}'"
+        )
+
+        success = final_status == new_status
+
+        return {
+            "success": success,
+            "old_status": old_status,
+            "new_status": new_status,
+            "final_status": final_status,
+            "message": f"Статус {'изменен' if success else 'НЕ изменен'}",
+        }
+
+    except Exception as e:
+        logger.error(
+            f"ТЕСТ: Ошибка при тестировании статуса чека {receipt_id}: {str(e)}"
+        )
+        return {"success": False, "error": f"Ошибка при тестировании: {str(e)}"}

@@ -9,9 +9,9 @@ from config import ADMIN_PANEL_ENABLED
 from services.prize_service import issue_prize, promo_manager
 from services.weekly_lottery_service import WeeklyLotteryService
 from services.lottery_service import select_winner, notify_winner, notify_participants
-from models.receipt import Receipt
-from models.user import User
-from models.prize import Prize
+from models.receipt_model import Receipt
+from models.user_model import User
+from models.prize_model import Prize
 from logger import logger
 
 # Создаем роутер для админки

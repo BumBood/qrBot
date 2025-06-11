@@ -89,11 +89,31 @@ async def verify_check(
 
         # Проверяем наличие ошибок в ответе
         if result.get("code") != 1:
-            logger.error(f"Ошибка в ответе API proverkacheka.com: {result.get('data')}")
+            error_data = result.get("data", {})
+            error_message = "Чек не найден или данные некорректны"
+
+            # Детализируем ошибки на основе кода ответа
+            code = result.get("code", 0)
+            if code == 2:
+                error_message = "Некорректные параметры запроса"
+            elif code == 3:
+                error_message = "Чек не найден в базе ФНС"
+            elif code == 4:
+                error_message = "Превышен лимит запросов к API"
+            elif code == 5:
+                error_message = "Неверный токен доступа"
+            elif isinstance(error_data, str):
+                error_message = error_data
+            elif isinstance(error_data, dict) and "message" in error_data:
+                error_message = error_data["message"]
+
+            logger.error(f"API proverkacheka.com вернул код {code}: {error_message}")
+
             return {
                 "success": False,
-                "error": "Ошибка проверки чека",
-                "details": result.get("data", {}),
+                "error": error_message,
+                "details": error_data,
+                "api_code": code,
             }
 
         return {"success": True, "data": result.get("data", {})}

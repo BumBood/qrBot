@@ -6,9 +6,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime
 
-from models.receipt import Receipt
-from models.user import User
-from services.fnc_api import verify_receipt
+from models.receipt_model import Receipt
+from models.user_model import User
+from services.check_api_service import verify_check
+from config import PROVERKACHEKA_API_TOKEN
 from errors import ReceiptValidationError, QRCodeError
 from logger import logger
 
@@ -23,7 +24,7 @@ QR_PATTERN = r"t=(?P<date>\d{8}T\d{6})&s=(?P<amount>[\d.]+)&fn=(?P<fn>\d+)&i=(?P
 
 async def process_receipt_photo(user_id: int, photo_file_path: str) -> dict:
     """
-    Обрабатывает фото чека, распознает QR-код и извлекает данные
+    Обрабатывает фото чека, распознает QR-код и извлекает данные или использует API для распознавания
 
     Args:
         user_id: ID пользователя
@@ -36,6 +37,32 @@ async def process_receipt_photo(user_id: int, photo_file_path: str) -> dict:
         QRCodeError: Если не удалось распознать QR-код
     """
     try:
+        # Сначала пробуем использовать API proverkacheka.com для распознавания QR-кода
+        api_result = await verify_check(
+            token=PROVERKACHEKA_API_TOKEN, qr_file_path=photo_file_path
+        )
+
+        if api_result["success"] and api_result.get("data"):
+            # Извлекаем данные из ответа API
+            check_data = api_result["data"]
+
+            # Получаем необходимые данные
+            fn = check_data.get("fn", "")
+            fd = check_data.get("fiscalDocumentNumber", "")
+            fpd = check_data.get("fiscalSign", "")
+            amount = (
+                float(check_data.get("totalSum", 0)) / 100
+            )  # Сумма в копейках, переводим в рубли
+
+            # Проверяем формат данных
+            if not validate_receipt_data(fn, fd, fpd, amount):
+                raise ReceiptValidationError("Неверный формат данных чека")
+
+            return {"success": True, "fn": fn, "fd": fd, "fpd": fpd, "amount": amount}
+
+        # Если API не смог распознать, пробуем локальное распознавание
+        logger.info("API не смог распознать QR-код, пробуем локальное распознавание")
+
         # Загружаем изображение
         image = cv2.imread(photo_file_path)
         if image is None:
@@ -53,9 +80,40 @@ async def process_receipt_photo(user_id: int, photo_file_path: str) -> dict:
         # Извлекаем данные с помощью регулярного выражения
         match = re.search(QR_PATTERN, qr_data)
         if not match:
-            raise QRCodeError("Формат QR-кода не соответствует ожидаемому")
+            # Если не удалось извлечь данные по шаблону, пробуем использовать API с сырыми данными QR-кода
+            api_result = await verify_check(
+                token=PROVERKACHEKA_API_TOKEN, qr_raw=qr_data
+            )
 
-        # Получаем данные из QR-кода
+            if api_result["success"] and api_result.get("data"):
+                # Извлекаем данные из ответа API
+                check_data = api_result["data"]
+
+                # Получаем необходимые данные
+                fn = check_data.get("fn", "")
+                fd = check_data.get("fiscalDocumentNumber", "")
+                fpd = check_data.get("fiscalSign", "")
+                amount = (
+                    float(check_data.get("totalSum", 0)) / 100
+                )  # Сумма в копейках, переводим в рубли
+
+                # Проверяем формат данных
+                if not validate_receipt_data(fn, fd, fpd, amount):
+                    raise ReceiptValidationError("Неверный формат данных чека")
+
+                return {
+                    "success": True,
+                    "fn": fn,
+                    "fd": fd,
+                    "fpd": fpd,
+                    "amount": amount,
+                }
+            else:
+                raise QRCodeError(
+                    "Формат QR-кода не соответствует ожидаемому и не распознан API"
+                )
+
+        # Получаем данные из QR-кода (если распознали локально)
         fn = match.group("fn")
         fd = match.group("fd")
         fpd = match.group("fpd")
@@ -157,22 +215,35 @@ async def process_manual_receipt(
         session.add(new_receipt)
         await session.commit()
 
+        # Обновляем объект, чтобы получить ID
+        await session.refresh(new_receipt)
+
         return {"success": True, "receipt_id": new_receipt.id}
 
     except ReceiptValidationError as e:
-        await session.rollback()
+        try:
+            await session.rollback()
+        except Exception:
+            # Игнорируем ошибки при rollback
+            pass
+
         logger.error(f"Ошибка валидации чека: {str(e)}")
         return {"success": False, "error": str(e)}
 
     except Exception as e:
-        await session.rollback()
+        try:
+            await session.rollback()
+        except Exception:
+            # Игнорируем ошибки при rollback
+            pass
+
         logger.error(f"Непредвиденная ошибка при обработке чека: {str(e)}")
         return {"success": False, "error": "Произошла ошибка при обработке чека"}
 
 
 async def verify_receipt_with_api(session: AsyncSession, receipt_id: int) -> dict:
     """
-    Проверяет чек через API ФНС
+    Проверяет чек через API proverkacheka.com
 
     Args:
         session: Сессия базы данных
@@ -191,30 +262,58 @@ async def verify_receipt_with_api(session: AsyncSession, receipt_id: int) -> dic
         if not receipt:
             return {"success": False, "error": "Чек не найден"}
 
-        # Проверяем чек через API ФНС
-        api_result = await verify_receipt(
-            receipt.fn, receipt.fd, receipt.fpd, float(receipt.amount)
+        # Проверяем чек через API proverkacheka.com
+        # Форматируем время в формат YYYYMMDDTHHMM
+        receipt_date = receipt.created_at.strftime("%Y%m%dT%H%M")
+
+        api_result = await verify_check(
+            token=PROVERKACHEKA_API_TOKEN,
+            fn=receipt.fn,
+            fd=receipt.fd,
+            fp=receipt.fpd,
+            time=receipt_date,
+            n="1",  # Предполагаем, что это приход
+            s=str(receipt.amount),
         )
+
+        if not api_result["success"]:
+            logger.error(
+                f"Ошибка при проверке чека через API: {api_result.get('error')}"
+            )
+
+            # Обновляем статус чека на "rejected" в случае ошибки
+            receipt.status = "rejected"
+            receipt.verification_date = datetime.now()
+            await session.commit()
+
+            return {
+                "success": False,
+                "error": api_result.get("error", "Ошибка при проверке чека"),
+            }
 
         # Обновляем статус чека
         receipt.status = "verified"
         receipt.verification_date = datetime.now()
 
         # Если в ответе есть информация о товарах, анализируем ее
-        if "items" in api_result:
+        items_data = api_result.get("data", {}).get("items", [])
+        aisida_count = 0
+
+        if items_data:
             # Подсчитываем количество товаров "Айсида"
-            aisida_count = 0
-            for item in api_result.get("items", []):
+            for item in items_data:
                 if "Айсида" in item.get("name", ""):
                     aisida_count += 1
 
             receipt.items_count = aisida_count
 
         # Если в ответе есть информация о магазине, сохраняем ее
-        if "retailPlace" in api_result:
-            receipt.pharmacy = api_result.get("retailPlace")
+        retail_place = api_result.get("data", {}).get("retailPlace")
+        if retail_place:
+            receipt.pharmacy = retail_place
 
-        await session.commit()
+        # Сохраняем изменения
+        session.commit()
 
         return {
             "success": True,
@@ -223,13 +322,23 @@ async def verify_receipt_with_api(session: AsyncSession, receipt_id: int) -> dic
         }
 
     except Exception as e:
-        await session.rollback()
+        # Логируем ошибку
         logger.error(f"Ошибка при проверке чека через API: {str(e)}")
 
-        # Обновляем статус чека на "rejected" в случае ошибки
-        if receipt:
-            receipt.status = "rejected"
-            receipt.verification_date = datetime.now()
-            await session.commit()
+        try:
+            # Пытаемся сделать rollback в безопасном режиме
+            await session.rollback()
+
+            # Если receipt определен, обновляем его статус
+            if "receipt" in locals() and receipt:
+                # Обновляем статус без использования вложенной транзакции
+                receipt.status = "rejected"
+                receipt.verification_date = datetime.now()
+
+                # Коммитим изменения
+                await session.commit()
+        except Exception as inner_e:
+            # Если произошла ошибка при обработке исключения, логируем её
+            logger.error(f"Ошибка при обработке исключения: {str(inner_e)}")
 
         return {"success": False, "error": str(e)}

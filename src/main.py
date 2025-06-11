@@ -13,9 +13,12 @@ from handlers import (
     register_base_handlers,
     register_registration_handlers,
     register_receipt_handlers,
+    register_weekly_lottery_handlers,
+    register_admin_handlers,
 )
 from logger import logger
-from handlers.registration import register_user
+from handlers.registration_handler import register_user
+from services.scheduler_service import lottery_scheduler
 
 
 async def on_startup(bot: Bot) -> None:
@@ -31,11 +34,20 @@ async def on_startup(bot: Bot) -> None:
 
     logger.info("Таблицы в базе данных созданы")
 
+    # Запускаем планировщик еженедельных розыгрышей
+    lottery_scheduler.bot = bot
+    lottery_scheduler.start_scheduler()
+    logger.info("Планировщик еженедельных розыгрышей запущен")
+
 
 async def on_shutdown(bot: Bot) -> None:
     """
     Выполняется при остановке бота
     """
+    # Останавливаем планировщик
+    lottery_scheduler.stop_scheduler()
+    logger.info("Планировщик остановлен")
+
     logger.info("Бот остановлен")
 
 
@@ -73,6 +85,8 @@ async def main() -> None:
     dp.include_router(register_base_handlers())
     dp.include_router(register_registration_handlers())
     dp.include_router(register_receipt_handlers())
+    dp.include_router(register_weekly_lottery_handlers())
+    dp.include_router(register_admin_handlers())
 
     # Регистрируем обработчики запуска и остановки
     dp.startup.register(on_startup)

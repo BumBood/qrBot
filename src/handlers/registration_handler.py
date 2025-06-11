@@ -4,7 +4,7 @@ from aiogram.filters import Command
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from models.user import User
+from models.user_model import User
 from logger import logger
 
 # Создаем роутер для регистрации

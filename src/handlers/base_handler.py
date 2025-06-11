@@ -16,10 +16,12 @@ def get_main_menu_keyboard():
     builder.button(text="🔍 Зарегистрировать покупку", callback_data="register_receipt")
     builder.button(text="📦 О продукции «Айсида»", callback_data="about_aisida")
     builder.button(text="📝 Мои чеки", callback_data="my_receipts")
-    builder.button(text="🎁 Розыгрыш Главного приза", callback_data="lottery")
+    builder.button(text="🎁 Еженедельный розыгрыш OZON", callback_data="weekly_lottery")
+    builder.button(text="🏆 Розыгрыш Главного приза", callback_data="lottery")
     builder.button(text="❓ Частые вопросы", callback_data="faq")
     builder.adjust(1)  # По одной кнопке в ряду
     return builder.as_markup()
+
 
 def get_start_keyboard():
     """
@@ -30,6 +32,7 @@ def get_start_keyboard():
     builder.button(text="Меню", callback_data="main_menu")
     builder.adjust(1)
     return builder.as_markup()
+
 
 @router.message(Command("start"))
 async def cmd_start(message: Message):

@@ -6,7 +6,7 @@ from config import DB_URL
 Base = declarative_base()
 
 # Создаем асинхронный движок SQLAlchemy
-engine = create_async_engine(DB_URL, echo=True)
+engine = create_async_engine(DB_URL)
 
 # Создаем фабрику сессий
 async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)

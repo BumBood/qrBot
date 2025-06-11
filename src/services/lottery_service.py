@@ -2,8 +2,8 @@ import random
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from models.receipt import Receipt
-from models.user import User
+from models.receipt_model import Receipt
+from models.user_model import User
 from logger import logger
 
 

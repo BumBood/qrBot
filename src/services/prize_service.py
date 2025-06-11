@@ -7,19 +7,21 @@ from datetime import datetime
 
 from models.prize_model import Prize
 from models.receipt_model import Receipt
+from services.promocode_service import promocode_service
 from logger import logger
 
 
 class PromoCodeManager:
-    """Менеджер для работы с промокодами"""
+    """Менеджер для работы с промокодами (LEGACY - для обратной совместимости)"""
 
     def __init__(self):
+        # Оставляем пути к файлам для возможной миграции данных
         self.promocodes_200_file = "data/promocodes/promocodes_200.txt"
         self.promocodes_500_file = "data/promocodes/promocodes_500.txt"
 
     def _load_promocodes(self, file_path: str) -> List[str]:
         """
-        Загружает промокоды из файла
+        Загружает промокоды из файла (LEGACY)
 
         Args:
             file_path: Путь к файлу с промокодами
@@ -29,13 +31,15 @@ class PromoCodeManager:
         """
         try:
             if not os.path.exists(file_path):
-                logger.error(f"Файл с промокодами не найден: {file_path}")
+                logger.warning(
+                    f"Файл с промокодами не найден: {file_path}. Используется база данных."
+                )
                 return []
 
             with open(file_path, "r", encoding="utf-8") as f:
                 codes = [line.strip() for line in f.readlines() if line.strip()]
 
-            logger.info(f"Загружено {len(codes)} промокодов из {file_path}")
+            logger.info(f"Загружено {len(codes)} промокодов из {file_path} (LEGACY)")
             return codes
 
         except Exception as e:
@@ -46,7 +50,7 @@ class PromoCodeManager:
         self, session: AsyncSession, discount_amount: int
     ) -> Optional[str]:
         """
-        Получает доступный промокод для указанной скидки
+        Получает доступный промокод для указанной скидки (LEGACY - переадресация на новый сервис)
 
         Args:
             session: Сессия базы данных
@@ -55,39 +59,17 @@ class PromoCodeManager:
         Returns:
             Optional[str]: Промокод или None если промокоды закончились
         """
-        # Определяем файл с промокодами
-        if discount_amount == 200:
-            file_path = self.promocodes_200_file
-        elif discount_amount == 500:
-            file_path = self.promocodes_500_file
-        else:
-            logger.error(f"Неподдерживаемый размер скидки: {discount_amount}")
-            return None
-
-        # Загружаем все промокоды из файла
-        all_codes = self._load_promocodes(file_path)
-        if not all_codes:
-            return None
-
-        # Получаем уже использованные промокоды
-        used_codes_query = await session.execute(
-            select(Prize.code).where(
-                Prize.code.isnot(None), Prize.discount_amount == discount_amount
-            )
+        logger.warning(
+            "Используется устаревший метод get_available_promocode. Переходим на новый сервис."
         )
-        used_codes = {row[0] for row in used_codes_query.fetchall()}
 
-        # Находим доступные промокоды
-        available_codes = [code for code in all_codes if code not in used_codes]
-
-        if not available_codes:
-            logger.warning(f"Все промокоды на {discount_amount} руб. закончились")
-            return None
-
-        # Возвращаем случайный доступный промокод
-        return random.choice(available_codes)
+        promocode = await promocode_service.get_available_promocode(
+            session, discount_amount
+        )
+        return promocode.code if promocode else None
 
 
+# Создаем экземпляр для обратной совместимости
 promo_manager = PromoCodeManager()
 
 
@@ -134,8 +116,8 @@ async def issue_prize(session: AsyncSession, receipt_id: int, items_count: int) 
             logger.error(f"Некорректное количество товаров Айсида: {items_count}")
             return {"success": False, "error": "В чеке не найдены товары Айсида"}
 
-        # Получаем доступный промокод
-        promocode = await promo_manager.get_available_promocode(
+        # Получаем доступный промокод из базы данных
+        promocode = await promocode_service.get_available_promocode(
             session, discount_amount
         )
 
@@ -146,11 +128,12 @@ async def issue_prize(session: AsyncSession, receipt_id: int, items_count: int) 
                 "error": f"К сожалению, промокоды на скидку {discount_amount} руб. временно закончились",
             }
 
-        # Создаем новый подарок
+        # Создаем новый подарок с привязкой к промокоду в БД
         new_prize = Prize(
             receipt_id=receipt_id,
             type=prize_type,
-            code=promocode,
+            code=promocode.code,  # Дублируем код для обратной совместимости
+            promocode_id=promocode.id,  # Новая связь с таблицей промокодов
             discount_amount=discount_amount,
             used=False,
         )
@@ -163,16 +146,17 @@ async def issue_prize(session: AsyncSession, receipt_id: int, items_count: int) 
         await session.refresh(new_prize)
 
         logger.info(
-            f"Выдан промокод {promocode} на {discount_amount} руб. за чек {receipt_id}"
+            f"Выдан промокод {promocode.code} на {discount_amount} руб. за чек {receipt_id} (ID промокода в БД: {promocode.id})"
         )
 
         return {
             "success": True,
             "prize_id": new_prize.id,
             "type": prize_type,
-            "code": promocode,
+            "code": promocode.code,
             "discount_amount": discount_amount,
             "items_count": items_count,
+            "promocode_id": promocode.id,
         }
 
     except Exception as e:

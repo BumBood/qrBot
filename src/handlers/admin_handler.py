@@ -1,12 +1,15 @@
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime
 import random
 
 from config import ADMIN_PANEL_ENABLED
 from services.prize_service import issue_prize, promo_manager
+from services.promocode_service import promocode_service
 from services.weekly_lottery_service import WeeklyLotteryService
 from services.lottery_service import select_winner, notify_winner, notify_participants
 from models.receipt_model import Receipt
@@ -18,10 +21,19 @@ from logger import logger
 router = Router()
 
 
+# Состояния для FSM управления промокодами
+class AdminPromoStates(StatesGroup):
+    waiting_for_promocodes_200 = State()  # Ожидание промокодов на 200р
+    waiting_for_promocodes_500 = State()  # Ожидание промокодов на 500р
+
+
 def get_admin_keyboard():
     """Создает клавиатуру админки"""
     builder = InlineKeyboardBuilder()
     builder.button(text="🎁 Выдать промокод", callback_data="admin_issue_promo")
+    builder.button(
+        text="🎫 Управление промокодами", callback_data="admin_manage_promos"
+    )
     builder.button(
         text="🎲 Провести еженедельную лотерею", callback_data="admin_weekly_lottery"
     )
@@ -31,7 +43,23 @@ def get_admin_keyboard():
     builder.button(text="📊 Статистика", callback_data="admin_stats")
     builder.button(text="📋 Последние чеки", callback_data="admin_recent_receipts")
     builder.button(text="🔄 Обновить", callback_data="admin_menu")
-    builder.adjust(1)
+    builder.adjust(2)
+    return builder.as_markup()
+
+
+def get_promo_management_keyboard():
+    """Создает клавиатуру управления промокодами"""
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text="➕ Добавить промокоды 200р", callback_data="admin_add_promo_200"
+    )
+    builder.button(
+        text="➕ Добавить промокоды 500р", callback_data="admin_add_promo_500"
+    )
+    builder.button(text="📊 Статистика промокодов", callback_data="admin_promo_stats")
+    builder.button(text="📋 Список промокодов", callback_data="admin_promo_list")
+    builder.button(text="◀️ Назад в админку", callback_data="admin_menu")
+    builder.adjust(2)
     return builder.as_markup()
 
 
@@ -46,6 +74,7 @@ async def admin_command(message: Message, session: AsyncSession):
 
     # Получаем статистику
     stats = await get_admin_stats(session)
+    promo_stats = await promocode_service.get_promocodes_stats(session)
 
     text = (
         "🔧 <b>ВРЕМЕННАЯ АДМИНКА ДЛЯ ТЕСТОВ</b>\n\n"
@@ -53,9 +82,13 @@ async def admin_command(message: Message, session: AsyncSession):
         f"👥 Пользователей: {stats['users_count']}\n"
         f"🧾 Чеков: {stats['receipts_count']}\n"
         f"✅ Подтвержденных: {stats['verified_receipts']}\n"
-        f"🎁 Промокодов выдано: {stats['prizes_count']}\n"
-        f"💰 Промокоды 200р: {stats['promo_200_count']}\n"
-        f"💰 Промокоды 500р: {stats['promo_500_count']}\n\n"
+        f"🎁 Промокодов выдано: {stats['prizes_count']}\n\n"
+        f"💰 <b>Промокоды в БД:</b>\n"
+        f"📦 Всего в системе: {promo_stats['total_count']}\n"
+        f"💎 Доступно 200р: {promo_stats['available_200']}\n"
+        f"💎 Доступно 500р: {promo_stats['available_500']}\n"
+        f"✅ Использовано 200р: {promo_stats['used_200']}\n"
+        f"✅ Использовано 500р: {promo_stats['used_500']}\n\n"
         "<i>Выберите действие:</i>"
     )
 
@@ -72,6 +105,7 @@ async def admin_menu_callback(callback: CallbackQuery, session: AsyncSession):
         return
 
     stats = await get_admin_stats(session)
+    promo_stats = await promocode_service.get_promocodes_stats(session)
 
     text = (
         "🔧 <b>ВРЕМЕННАЯ АДМИНКА ДЛЯ ТЕСТОВ</b>\n\n"
@@ -79,9 +113,13 @@ async def admin_menu_callback(callback: CallbackQuery, session: AsyncSession):
         f"👥 Пользователей: {stats['users_count']}\n"
         f"🧾 Чеков: {stats['receipts_count']}\n"
         f"✅ Подтвержденных: {stats['verified_receipts']}\n"
-        f"🎁 Промокодов выдано: {stats['prizes_count']}\n"
-        f"💰 Промокоды 200р: {stats['promo_200_count']}\n"
-        f"💰 Промокоды 500р: {stats['promo_500_count']}\n\n"
+        f"🎁 Промокодов выдано: {stats['prizes_count']}\n\n"
+        f"💰 <b>Промокоды в БД:</b>\n"
+        f"📦 Всего в системе: {promo_stats['total_count']}\n"
+        f"💎 Доступно 200р: {promo_stats['available_200']}\n"
+        f"💎 Доступно 500р: {promo_stats['available_500']}\n"
+        f"✅ Использовано 200р: {promo_stats['used_200']}\n"
+        f"✅ Использовано 500р: {promo_stats['used_500']}\n\n"
         "<i>Выберите действие:</i>"
     )
 
@@ -344,6 +382,278 @@ async def admin_recent_receipts_callback(
     await callback.answer()
 
 
+@router.callback_query(F.data == "admin_manage_promos")
+async def admin_manage_promos_callback(callback: CallbackQuery, session: AsyncSession):
+    """
+    Показывает меню управления промокодами
+    """
+    if not ADMIN_PANEL_ENABLED:
+        await callback.answer("Админка отключена.")
+        return
+
+    promo_stats = await promocode_service.get_promocodes_stats(session)
+
+    text = (
+        "🎫 <b>УПРАВЛЕНИЕ ПРОМОКОДАМИ</b>\n\n"
+        f"📦 <b>Всего промокодов в БД:</b> {promo_stats['total_count']}\n\n"
+        f"💰 <b>Промокоды 200р:</b>\n"
+        f"├ Всего: {promo_stats['promo_200_total']}\n"
+        f"├ Доступно: {promo_stats['available_200']}\n"
+        f"└ Использовано: {promo_stats['used_200']}\n\n"
+        f"💎 <b>Промокоды 500р:</b>\n"
+        f"├ Всего: {promo_stats['promo_500_total']}\n"
+        f"├ Доступно: {promo_stats['available_500']}\n"
+        f"└ Использовано: {promo_stats['used_500']}\n\n"
+        "<i>Выберите действие:</i>"
+    )
+
+    await callback.message.edit_text(
+        text, reply_markup=get_promo_management_keyboard(), parse_mode="HTML"
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "admin_add_promo_200")
+async def admin_add_promo_200_callback(callback: CallbackQuery, state: FSMContext):
+    """
+    Запрашивает ввод промокодов на 200р
+    """
+    if not ADMIN_PANEL_ENABLED:
+        await callback.answer("Админка отключена.")
+        return
+
+    text = (
+        "💰 <b>ДОБАВЛЕНИЕ ПРОМОКОДОВ НА 200 РУБЛЕЙ</b>\n\n"
+        "Отправьте промокоды списком, каждый с новой строки.\n"
+        "Можно отправить один или несколько промокодов.\n\n"
+        "<i>Пример:</i>\n"
+        "<code>PROMO200-001\n"
+        "PROMO200-002\n"
+        "PROMO200-003</code>\n\n"
+        "Или отправьте <b>/cancel</b> для отмены."
+    )
+
+    builder = InlineKeyboardBuilder()
+    builder.button(text="❌ Отмена", callback_data="admin_manage_promos")
+
+    await callback.message.edit_text(
+        text, reply_markup=builder.as_markup(), parse_mode="HTML"
+    )
+    await state.set_state(AdminPromoStates.waiting_for_promocodes_200)
+    await callback.answer()
+
+
+@router.callback_query(F.data == "admin_add_promo_500")
+async def admin_add_promo_500_callback(callback: CallbackQuery, state: FSMContext):
+    """
+    Запрашивает ввод промокодов на 500р
+    """
+    if not ADMIN_PANEL_ENABLED:
+        await callback.answer("Админка отключена.")
+        return
+
+    text = (
+        "💎 <b>ДОБАВЛЕНИЕ ПРОМОКОДОВ НА 500 РУБЛЕЙ</b>\n\n"
+        "Отправьте промокоды списком, каждый с новой строки.\n"
+        "Можно отправить один или несколько промокодов.\n\n"
+        "<i>Пример:</i>\n"
+        "<code>PROMO500-001\n"
+        "PROMO500-002\n"
+        "PROMO500-003</code>\n\n"
+        "Или отправьте <b>/cancel</b> для отмены."
+    )
+
+    builder = InlineKeyboardBuilder()
+    builder.button(text="❌ Отмена", callback_data="admin_manage_promos")
+
+    await callback.message.edit_text(
+        text, reply_markup=builder.as_markup(), parse_mode="HTML"
+    )
+    await state.set_state(AdminPromoStates.waiting_for_promocodes_500)
+    await callback.answer()
+
+
+@router.message(AdminPromoStates.waiting_for_promocodes_200)
+async def process_promocodes_200(
+    message: Message, state: FSMContext, session: AsyncSession
+):
+    """
+    Обрабатывает ввод промокодов на 200р
+    """
+    if message.text == "/cancel":
+        await state.clear()
+        await message.answer(
+            "Операция отменена.", reply_markup=get_promo_management_keyboard()
+        )
+        return
+
+    # Парсим промокоды из сообщения
+    codes = [line.strip() for line in message.text.split("\n") if line.strip()]
+
+    if not codes:
+        await message.answer("Не найдено ни одного промокода. Попробуйте еще раз.")
+        return
+
+    # Добавляем промокоды в БД
+    result = await promocode_service.add_promocodes(session, codes, 200)
+
+    if result["success"]:
+        text = (
+            f"✅ <b>Промокоды на 200р добавлены!</b>\n\n"
+            f"📝 Добавлено: {result['added_count']}\n"
+            f"⚠️ Пропущено (дубли): {result['skipped_count']}\n"
+        )
+
+        if result["errors"] and len(result["errors"]) <= 5:
+            text += f"\n<i>Ошибки:</i>\n"
+            for error in result["errors"][:5]:
+                text += f"• {error}\n"
+        elif len(result["errors"]) > 5:
+            text += f"\n<i>И еще {len(result['errors']) - 5} ошибок...</i>\n"
+    else:
+        text = f"❌ <b>Ошибка при добавлении промокодов:</b>\n{result['error']}"
+
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text="◀️ Назад к управлению промокодами", callback_data="admin_manage_promos"
+    )
+
+    await message.answer(text, reply_markup=builder.as_markup(), parse_mode="HTML")
+    await state.clear()
+
+
+@router.message(AdminPromoStates.waiting_for_promocodes_500)
+async def process_promocodes_500(
+    message: Message, state: FSMContext, session: AsyncSession
+):
+    """
+    Обрабатывает ввод промокодов на 500р
+    """
+    if message.text == "/cancel":
+        await state.clear()
+        await message.answer(
+            "Операция отменена.", reply_markup=get_promo_management_keyboard()
+        )
+        return
+
+    # Парсим промокоды из сообщения
+    codes = [line.strip() for line in message.text.split("\n") if line.strip()]
+
+    if not codes:
+        await message.answer("Не найдено ни одного промокода. Попробуйте еще раз.")
+        return
+
+    # Добавляем промокоды в БД
+    result = await promocode_service.add_promocodes(session, codes, 500)
+
+    if result["success"]:
+        text = (
+            f"✅ <b>Промокоды на 500р добавлены!</b>\n\n"
+            f"📝 Добавлено: {result['added_count']}\n"
+            f"⚠️ Пропущено (дубли): {result['skipped_count']}\n"
+        )
+
+        if result["errors"] and len(result["errors"]) <= 5:
+            text += f"\n<i>Ошибки:</i>\n"
+            for error in result["errors"][:5]:
+                text += f"• {error}\n"
+        elif len(result["errors"]) > 5:
+            text += f"\n<i>И еще {len(result['errors']) - 5} ошибок...</i>\n"
+    else:
+        text = f"❌ <b>Ошибка при добавлении промокодов:</b>\n{result['error']}"
+
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text="◀️ Назад к управлению промокодами", callback_data="admin_manage_promos"
+    )
+
+    await message.answer(text, reply_markup=builder.as_markup(), parse_mode="HTML")
+    await state.clear()
+
+
+@router.callback_query(F.data == "admin_promo_stats")
+async def admin_promo_stats_callback(callback: CallbackQuery, session: AsyncSession):
+    """
+    Показывает подробную статистику промокодов
+    """
+    if not ADMIN_PANEL_ENABLED:
+        await callback.answer("Админка отключена.")
+        return
+
+    stats = await promocode_service.get_promocodes_stats(session)
+
+    text = (
+        "📊 <b>ПОДРОБНАЯ СТАТИСТИКА ПРОМОКОДОВ</b>\n\n"
+        f"📦 <b>Общая статистика:</b>\n"
+        f"└ Всего промокодов в БД: {stats['total_count']}\n\n"
+        f"💰 <b>Промокоды на 200 рублей:</b>\n"
+        f"├ Всего создано: {stats['promo_200_total']}\n"
+        f"├ Доступно для выдачи: {stats['available_200']}\n"
+        f"└ Уже использовано: {stats['used_200']}\n\n"
+        f"💎 <b>Промокоды на 500 рублей:</b>\n"
+        f"├ Всего создано: {stats['promo_500_total']}\n"
+        f"├ Доступно для выдачи: {stats['available_500']}\n"
+        f"└ Уже использовано: {stats['used_500']}\n\n"
+    )
+
+    # Добавляем процентную статистику
+    if stats["promo_200_total"] > 0:
+        usage_200 = (stats["used_200"] / stats["promo_200_total"]) * 100
+        text += f"📈 <b>Использование 200р:</b> {usage_200:.1f}%\n"
+
+    if stats["promo_500_total"] > 0:
+        usage_500 = (stats["used_500"] / stats["promo_500_total"]) * 100
+        text += f"📈 <b>Использование 500р:</b> {usage_500:.1f}%\n"
+
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🔄 Обновить", callback_data="admin_promo_stats")
+    builder.button(text="◀️ Назад", callback_data="admin_manage_promos")
+
+    await callback.message.edit_text(
+        text, reply_markup=builder.as_markup(), parse_mode="HTML"
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "admin_promo_list")
+async def admin_promo_list_callback(callback: CallbackQuery, session: AsyncSession):
+    """
+    Показывает список последних промокодов
+    """
+    if not ADMIN_PANEL_ENABLED:
+        await callback.answer("Админка отключена.")
+        return
+
+    # Получаем последние промокоды
+    recent_promos = await promocode_service.get_promocodes_list(session, limit=10)
+
+    text = "📋 <b>ПОСЛЕДНИЕ 10 ПРОМОКОДОВ</b>\n\n"
+
+    if not recent_promos:
+        text += "❌ Промокодов не найдено."
+    else:
+        for promo in recent_promos:
+            status = "✅ Использован" if promo.is_used else "⭐ Доступен"
+            active = "🟢" if promo.is_active else "🔴"
+            created = promo.created_at.strftime("%d.%m %H:%M")
+
+            text += (
+                f"{active} <code>{promo.code}</code>\n"
+                f"├ Скидка: {promo.discount_amount}р\n"
+                f"├ Статус: {status}\n"
+                f"└ Создан: {created}\n\n"
+            )
+
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🔄 Обновить", callback_data="admin_promo_list")
+    builder.button(text="◀️ Назад", callback_data="admin_manage_promos")
+
+    await callback.message.edit_text(
+        text, reply_markup=builder.as_markup(), parse_mode="HTML"
+    )
+    await callback.answer()
+
+
 async def get_admin_stats(session: AsyncSession) -> dict:
     """Получает базовую статистику для админки"""
     try:
@@ -367,13 +677,12 @@ async def get_admin_stats(session: AsyncSession) -> dict:
         prizes_count = await session.execute(select(func.count(Prize.id)))
         prizes_count = prizes_count.scalar() or 0
 
-        # Промокоды 200р
+        # Выданные призы по типам (для обратной совместимости)
         promo_200_count = await session.execute(
             select(func.count(Prize.id)).where(Prize.discount_amount == 200)
         )
         promo_200_count = promo_200_count.scalar() or 0
 
-        # Промокоды 500р
         promo_500_count = await session.execute(
             select(func.count(Prize.id)).where(Prize.discount_amount == 500)
         )

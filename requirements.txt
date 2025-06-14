@@ -14,3 +14,4 @@ uvicorn
 aiofiles
 python-multipart
 passlib[bcrypt]
+itsdangerous

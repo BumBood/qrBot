@@ -12,6 +12,6 @@
 .env.test
 logs/
 __pycache__/
-qrbot.service
+*.service
 promocodes*.txt
 *.md

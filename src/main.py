@@ -17,7 +17,6 @@ from handlers import (
     register_registration_handlers,
     register_receipt_handlers,
     register_weekly_lottery_handlers,
-    register_admin_handlers,
 )
 from logger import logger
 from handlers.registration_handler import register_user

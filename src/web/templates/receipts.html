@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block content %}
+<h1 class="mb-4">Чеки</h1>
+<form class="row g-3 mb-4" method="get" action="/admin/receipts">
+  <div class="col-md-2">
+    <label for="status" class="form-label">Статус</label>
+    <select id="status" name="status" class="form-select">
+      <option value="">Все</option>
+      <option value="pending" {% if filters.status == "pending" %}selected{% endif %}>Ожидающие</option>
+      <option value="verified" {% if filters.status == "verified" %}selected{% endif %}>Подтверждённые</option>
+      <option value="rejected" {% if filters.status == "rejected" %}selected{% endif %}>Отклонённые</option>
+    </select>
+  </div>
+  <div class="col-md-3">
+    <label for="pharmacy" class="form-label">Аптека</label>
+    <input type="text" id="pharmacy" name="pharmacy" value="{{ filters.pharmacy or '' }}" class="form-control"/>
+  </div>
+  <div class="col-md-2">
+    <label for="start_date" class="form-label">Дата с</label>
+    <input type="date" id="start_date" name="start_date" value="{{ filters.start_date or '' }}" class="form-control"/>
+  </div>
+  <div class="col-md-2">
+    <label for="end_date" class="form-label">по</label>
+    <input type="date" id="end_date" name="end_date" value="{{ filters.end_date or '' }}" class="form-control"/>
+  </div>
+  <div class="col-md-2 align-self-end">
+    <button type="submit" class="btn btn-primary w-100">Фильтровать</button>
+  </div>
+</form>
+<div class="table-responsive">
+<table class="table table-striped table-bordered">
+<thead>
+<tr>
+    <th>ID</th><th>User ID</th><th>Сумма</th><th>Аптека</th><th>Адрес</th><th>Айсида</th><th>Статус</th><th>Дата</th><th>Действия</th>
+</tr>
+</thead>
+<tbody>
+{% for r in receipts %}
+<tr>
+  <td><a href="/admin/receipts/{{ r.id }}">{{ r.id }}</a></td>
+  <td>{{ r.user_id }}</td>
+  <td>{{ r.amount }}</td>
+  <td>{{ r.pharmacy or '' }}</td>
+  <td>{{ r.address or '' }}</td>
+  <td>{{ r.items_count }}</td>
+  <td>{{ r.status }}</td>
+  <td>{{ r.created_at.strftime("%Y-%m-%d %H:%M") }}</td>
+  <td>
+    <form action="/admin/receipts/{{ r.id }}/moderate" method="post" class="d-inline">
+      {% if r.status != "verified" %}
+      <button name="action" value="verified" class="btn btn-sm btn-success">Подтвердить</button>
+      {% endif %}
+      {% if r.status != "rejected" %}
+      <button name="action" value="rejected" class="btn btn-sm btn-danger">Отклонить</button>
+      {% endif %}
+    </form>
+  </td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+</div>
+{% endblock %} 

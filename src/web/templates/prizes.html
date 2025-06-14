@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block content %}
+<h1 class="mb-4">Призы</h1>
+<div class="table-responsive">
+<table class="table table-striped table-bordered">
+<thead>
+<tr>
+  <th>ID</th>
+  <th>Receipt ID</th>
+  <th>Type</th>
+  <th>Code</th>
+  <th>Discount</th>
+  <th>Used</th>
+  <th>Issued At</th>
+</tr>
+</thead>
+<tbody>
+{% for p in prizes %}
+<tr>
+  <td>{{ p.id }}</td>
+  <td><a href="/admin/receipts/{{ p.receipt_id }}">{{ p.receipt_id }}</a></td>
+  <td>{{ p.type }}</td>
+  <td>{{ p.code or '' }}</td>
+  <td>{{ p.discount_amount or '' }}</td>
+  <td>{{ 'Да' if p.used else 'Нет' }}</td>
+  <td>{{ p.issued_at.strftime("%Y-%m-%d %H:%M") }}</td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+</div>
+{% endblock %} 

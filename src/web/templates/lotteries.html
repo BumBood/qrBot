@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block content %}
+<h1 class="mb-4">История розыгрышей</h1>
+<div class="table-responsive">
+<table class="table table-striped table-bordered">
+<thead>
+<tr>
+  <th>ID</th>
+  <th>Неделя с</th>
+  <th>Неделя по</th>
+  <th>Проведён</th>
+  <th>Победитель (User ID)</th>
+  <th>Чек победителя</th>
+  <th>Сумма приза</th>
+  <th>Уведомление</th>
+</tr>
+</thead>
+<tbody>
+{% for l in lotteries %}
+<tr>
+  <td>{{ l.id }}</td>
+  <td>{{ l.week_start.strftime("%Y-%m-%d") }}</td>
+  <td>{{ l.week_end.strftime("%Y-%m-%d") }}</td>
+  <td>{{ l.conducted_at.strftime("%Y-%m-%d %H:%M") if l.conducted_at else '' }}</td>
+  <td>{{ l.winner_user_id or '' }}</td>
+  <td><a href="/admin/receipts/{{ l.winner_receipt_id }}">{{ l.winner_receipt_id or '' }}</a></td>
+  <td>{{ l.prize_amount }}</td>
+  <td>{{ 'Да' if l.notification_sent else 'Нет' }}</td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+</div>
+{% endblock %} 

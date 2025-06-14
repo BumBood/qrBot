@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block content %}
+<h1 class="mb-4">Пользователи</h1>
+{% if request.query_params.get('message') %}
+<div class="alert alert-info">{{ request.query_params.get('message') }}</div>
+{% endif %}
+<form action="/admin/weekly_lottery" method="get" class="mb-4">
+    <button type="submit" class="btn btn-primary">Провести еженедельную лотерею</button>
+</form>
+<div class="table-responsive">
+<table class="table table-hover table-bordered">
+<thead>
+<tr>
+    <th>ID</th><th>Username</th><th>Имя</th><th>UTM</th><th>Зарегистрирован</th>
+</tr>
+</thead>
+<tbody>
+{% for u in users %}
+<tr>
+  <td>{{ u.id }}</td>
+  <td>{{ u.username or '' }}</td>
+  <td>{{ u.full_name }}</td>
+  <td>{{ u.utm or '' }}</td>
+  <td>{{ u.registered_at.strftime("%Y-%m-%d %H:%M") }}</td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+</div>
+<h2 class="mt-5">Статистика UTM</h2>
+<div class="table-responsive">
+<table class="table table-sm">
+<thead><tr><th>UTM</th><th>Количество</th></tr></thead>
+<tbody>
+{% for utm, cnt in utm_counts.items() %}
+<tr><td>{{ utm }}</td><td>{{ cnt }}</td></tr>
+{% endfor %}
+</tbody>
+</table>
+</div>
+{% endblock %} 

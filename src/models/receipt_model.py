@@ -6,6 +6,7 @@ from sqlalchemy import (
     DateTime,
     Numeric,
     ForeignKey,
+    Text,
 )
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
@@ -21,7 +22,7 @@ class Receipt(Base):
     user_id = Column(
         BigInteger, ForeignKey("users.id"), nullable=False
     )  # Ссылка на пользователя
-    
+
     fn = Column(String(17), nullable=False)  # ФН
     fd = Column(String(6), nullable=False)  # ФД
     fpd = Column(String(10), nullable=False)  # ФПД
@@ -30,6 +31,11 @@ class Receipt(Base):
     verification_date = Column(DateTime, nullable=True)  # Дата проверки
     items_count = Column(Integer, default=0)  # Количество товаров "Айсида"
     pharmacy = Column(String(100), nullable=True)  # Аптека
+    address = Column(Text, nullable=True)  # Адрес магазина
+    aisida_items = Column(
+        Text, nullable=True
+    )  # JSON списка наименований товаров Айсида
+    raw_api_response = Column(Text, nullable=True)  # Полный ответ API в формате JSON
     created_at = Column(DateTime, server_default=func.now())  # Дата создания
 
     # Отношение к пользователю

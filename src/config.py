@@ -20,9 +20,3 @@ FNC_API_URL = os.getenv("FNC_API_URL", "https://api-fns.ru/api/v1/check")
 # API proverkacheka.com
 PROVERKACHEKA_API_TOKEN = os.getenv("PROVERKACHEKA_API_TOKEN", "")
 
-# ID администраторов
-ADMIN_IDS = (
-    list(map(int, os.getenv("ADMIN_IDS", "").split(",")))
-    if os.getenv("ADMIN_IDS")
-    else []
-)

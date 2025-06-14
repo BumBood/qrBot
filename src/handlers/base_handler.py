@@ -3,6 +3,7 @@ from aiogram.types import Message, CallbackQuery
 from aiogram.filters import Command
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy.ext.asyncio import AsyncSession
+from models.user_model import User
 from logger import logger
 
 # Создаем роутер для базовых команд
@@ -37,10 +38,19 @@ def get_start_keyboard():
 
 
 @router.message(Command("start"))
-async def cmd_start(message: Message):
+async def cmd_start(message: Message, session: AsyncSession):
     """
     Обрабатывает команду /start
     """
+    # Сохраняем UTM-метку, если передан аргумент (/start <utm>)
+    text = message.text or ""
+    parts = text.split(maxsplit=1)
+    utm = parts[1].strip() if len(parts) > 1 else None
+    if utm:
+        user = await session.get(User, message.from_user.id)
+        if user and not user.utm:
+            user.utm = utm
+            await session.commit()
     await message.answer(
         "👋 Добро пожаловать в бот для учета покупок и проверки чеков!\n\n"
         "Здесь вы можете регистрировать свои покупки, проверять чеки "

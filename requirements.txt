@@ -8,3 +8,9 @@ opencv-python
 pyzbar
 numpy
 apscheduler
+fastapi
+jinja2
+uvicorn
+aiofiles
+python-multipart
+passlib[bcrypt]

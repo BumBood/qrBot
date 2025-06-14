@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block content %}
+<h1 class="mb-4">Чек #{{ receipt.id }}</h1>
+<div class="table-responsive">
+<table class="table table-bordered">
+  <tbody>
+    <tr><th>ID</th><td>{{ receipt.id }}</td></tr>
+    <tr><th>User ID</th><td>{{ receipt.user_id }}</td></tr>
+    <tr><th>FN</th><td>{{ receipt.fn }}</td></tr>
+    <tr><th>FD</th><td>{{ receipt.fd }}</td></tr>
+    <tr><th>FPD</th><td>{{ receipt.fpd }}</td></tr>
+    <tr><th>Сумма</th><td>{{ receipt.amount }}</td></tr>
+    <tr><th>Статус</th><td>{{ receipt.status }}</td></tr>
+    <tr><th>Дата регистрации</th><td>{{ receipt.created_at.strftime("%Y-%m-%d %H:%M") }}</td></tr>
+    <tr><th>Дата проверки</th><td>{{ receipt.verification_date.strftime("%Y-%m-%d %H:%M") if receipt.verification_date else "" }}</td></tr>
+    <tr><th>Аптека</th><td>{{ receipt.pharmacy or "" }}</td></tr>
+    <tr><th>Адрес</th><td>{{ receipt.address or "" }}</td></tr>
+    <tr><th>Товары Айсида (кол-во)</th><td>{{ receipt.items_count }}</td></tr>
+    <tr><th>Наименования Айсида</th><td><pre>{{ receipt.aisida_items }}</pre></td></tr>
+    <tr><th>API ответ</th><td><pre>{{ receipt.raw_api_response }}</pre></td></tr>
+  </tbody>
+</table>
+</div>
+<a href="/admin/receipts" class="btn btn-secondary">Назад к списку чеков</a>
+{% endblock %} 

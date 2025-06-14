@@ -37,6 +37,7 @@ from pyzbar.pyzbar import decode
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime
+import json
 
 from models.receipt_model import Receipt
 from models.user_model import User
@@ -385,6 +386,7 @@ async def verify_receipt_with_api(session: AsyncSession, receipt_id: int) -> dic
         # Если в ответе есть информация о товарах, анализируем ее
         items_data = check_data.get("items", [])
         aisida_count = 0
+        aisida_items = []
 
         if items_data:
             # Подсчитываем количество товаров "Айсида"
@@ -393,17 +395,34 @@ async def verify_receipt_with_api(session: AsyncSession, receipt_id: int) -> dic
                 if "Айсида" in item_name or "айсида" in item_name.lower():
                     aisida_count += 1
                     logger.info(f"Найден товар Айсида: {item_name}")
+                    aisida_items.append(item_name)
 
             receipt.items_count = aisida_count
             logger.info(
                 f"Общее количество товаров Айсида в чеке {receipt_id}: {aisida_count}"
             )
 
-        # Если в ответе есть информация о магазине, сохраняем ее
-        retail_place = check_data.get("retailPlaceAddress")
-        if retail_place:
-            receipt.pharmacy = retail_place
+        # Сохраняем название организации и адрес магазина
+        shop_name = check_data.get("user")
+        if shop_name:
+            receipt.pharmacy = shop_name
+        address = check_data.get("retailPlaceAddress")
+        if address:
+            receipt.address = address
+        # Извлекаем время из ответа API
+        raw_date = check_data.get("dateTime")
+        if raw_date:
+            try:
+                dt = datetime.fromisoformat(raw_date)
+                date_formatted = dt.strftime("%d.%m.%Y %H:%M")
+            except Exception:
+                date_formatted = raw_date
+        else:
+            date_formatted = receipt.created_at.strftime("%d.%m.%Y %H:%M")
 
+        # Сохраняем наименования товаров, адрес и полный API ответ
+        receipt.aisida_items = json.dumps(aisida_items, ensure_ascii=False)
+        receipt.raw_api_response = json.dumps(api_result, ensure_ascii=False)
         # Сохраняем изменения
         await session.commit()
 
@@ -418,6 +437,9 @@ async def verify_receipt_with_api(session: AsyncSession, receipt_id: int) -> dic
             "status": "verified",
             "aisida_count": receipt.items_count,
             "pharmacy": receipt.pharmacy,
+            "address": receipt.address,
+            "date": date_formatted,
+            "aisida_items": aisida_items,
         }
 
     except Exception as e:

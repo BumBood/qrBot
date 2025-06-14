@@ -89,7 +89,6 @@ async def main() -> None:
     dp.include_router(register_registration_handlers())
     dp.include_router(register_receipt_handlers())
     dp.include_router(register_weekly_lottery_handlers())
-    dp.include_router(register_admin_handlers())
 
     # Регистрируем обработчики запуска и остановки
     dp.startup.register(on_startup)

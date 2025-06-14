@@ -8,8 +8,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from models.receipt_model import Receipt
 from models.user_model import User
+from models.promocode_model import Promocode
 from services.lottery_service import select_winner, notify_winner, notify_participants
 from services.weekly_lottery_service import WeeklyLotteryService
+from services.promocode_service import promocode_service
 from starlette.middleware.sessions import SessionMiddleware
 from passlib.context import CryptContext
 from fastapi import HTTPException, status
@@ -261,3 +263,114 @@ async def list_lotteries(
     return templates.TemplateResponse(
         "lotteries.html", {"request": request, "lotteries": lotteries}
     )
+
+
+@app.get("/admin/promocodes", response_class=HTMLResponse)
+async def list_promocodes(
+    request: Request,
+    current_admin: AdminUser = Depends(get_current_admin),
+    discount_amount: str = None,
+    is_used: str = None,
+    is_active: str = None,
+    message: str = None,
+    session: AsyncSession = Depends(get_db),
+):
+    """Страница управления промокодами"""
+
+    # Получаем статистику
+    stats = await promocode_service.get_promocodes_stats(session)
+
+    # Парсим фильтры
+    discount_filter = (
+        int(discount_amount) if discount_amount and discount_amount.isdigit() else None
+    )
+    used_filter = (
+        is_used == "true" if is_used else (False if is_used == "false" else None)
+    )
+    active_filter = (
+        is_active == "true" if is_active else (False if is_active == "false" else None)
+    )
+
+    # Получаем список промокодов с фильтрацией
+    promocodes = await promocode_service.get_promocodes_list(
+        session,
+        discount_amount=discount_filter,
+        is_used=used_filter,
+        is_active=active_filter,
+        limit=100,
+    )
+
+    return templates.TemplateResponse(
+        "promocodes.html",
+        {
+            "request": request,
+            "promocodes": promocodes,
+            "stats": stats,
+            "filters": {
+                "discount_amount": discount_amount,
+                "is_used": is_used,
+                "is_active": is_active,
+            },
+            "message": message,
+        },
+    )
+
+
+@app.post("/admin/promocodes/add")
+async def add_promocodes(
+    request: Request,
+    discount_amount: int = Form(...),
+    codes: str = Form(...),
+    current_admin: AdminUser = Depends(get_current_admin),
+    session: AsyncSession = Depends(get_db),
+):
+    """Добавление новых промокодов"""
+
+    # Парсим промокоды из текста
+    codes_list = [line.strip() for line in codes.split("\n") if line.strip()]
+
+    if not codes_list:
+        return RedirectResponse(
+            url="/admin/promocodes?message=Не найдено ни одного промокода",
+            status_code=303,
+        )
+
+    # Добавляем промокоды через сервис
+    result = await promocode_service.add_promocodes(
+        session, codes_list, discount_amount
+    )
+
+    if result["success"]:
+        message = f"Добавлено {result['added_count']} промокодов, пропущено {result['skipped_count']}"
+    else:
+        message = f"Ошибка: {result['error']}"
+
+    return RedirectResponse(url=f"/admin/promocodes?message={message}", status_code=303)
+
+
+@app.post("/admin/promocodes/{promocode_id}/deactivate")
+async def deactivate_promocode(
+    promocode_id: int,
+    current_admin: AdminUser = Depends(get_current_admin),
+    session: AsyncSession = Depends(get_db),
+):
+    """Деактивация промокода"""
+
+    result = await promocode_service.deactivate_promocode(session, promocode_id)
+
+    message = result.get("message", result.get("error", "Неизвестная ошибка"))
+    return RedirectResponse(url=f"/admin/promocodes?message={message}", status_code=303)
+
+
+@app.post("/admin/promocodes/{promocode_id}/activate")
+async def activate_promocode(
+    promocode_id: int,
+    current_admin: AdminUser = Depends(get_current_admin),
+    session: AsyncSession = Depends(get_db),
+):
+    """Активация промокода"""
+
+    result = await promocode_service.activate_promocode(session, promocode_id)
+
+    message = result.get("message", result.get("error", "Неизвестная ошибка"))
+    return RedirectResponse(url=f"/admin/promocodes?message={message}", status_code=303)

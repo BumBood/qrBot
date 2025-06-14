@@ -1,0 +1,192 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h2>Управление промокодами</h2>
+            <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addPromocodesModal">
+                Добавить промокоды
+            </button>
+        </div>
+
+        <!-- Статистика промокодов -->
+        <div class="row mb-4">
+            <div class="col-md-3">
+                <div class="card bg-primary text-white">
+                    <div class="card-body">
+                        <h5 class="card-title">Всего промокодов</h5>
+                        <h2>{{ stats.total_count }}</h2>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card bg-success text-white">
+                    <div class="card-body">
+                        <h5 class="card-title">Доступно 200₽</h5>
+                        <h2>{{ stats.available_200 }}</h2>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card bg-success text-white">
+                    <div class="card-body">
+                        <h5 class="card-title">Доступно 500₽</h5>
+                        <h2>{{ stats.available_500 }}</h2>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card bg-warning text-white">
+                    <div class="card-body">
+                        <h5 class="card-title">Использовано</h5>
+                        <h2>{{ stats.used_200 + stats.used_500 }}</h2>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Фильтры -->
+        <div class="card mb-4">
+            <div class="card-body">
+                <form method="get" action="/admin/promocodes">
+                    <div class="row">
+                        <div class="col-md-3">
+                            <select name="discount_amount" class="form-select">
+                                <option value="">Все типы</option>
+                                <option value="200" {% if filters.discount_amount == "200" %}selected{% endif %}>200₽</option>
+                                <option value="500" {% if filters.discount_amount == "500" %}selected{% endif %}>500₽</option>
+                            </select>
+                        </div>
+                        <div class="col-md-3">
+                            <select name="is_used" class="form-select">
+                                <option value="">Все промокоды</option>
+                                <option value="false" {% if filters.is_used == "false" %}selected{% endif %}>Доступные</option>
+                                <option value="true" {% if filters.is_used == "true" %}selected{% endif %}>Использованные</option>
+                            </select>
+                        </div>
+                        <div class="col-md-3">
+                            <select name="is_active" class="form-select">
+                                <option value="">Все статусы</option>
+                                <option value="true" {% if filters.is_active == "true" %}selected{% endif %}>Активные</option>
+                                <option value="false" {% if filters.is_active == "false" %}selected{% endif %}>Неактивные</option>
+                            </select>
+                        </div>
+                        <div class="col-md-3">
+                            <button type="submit" class="btn btn-primary">Фильтровать</button>
+                            <a href="/admin/promocodes" class="btn btn-secondary">Сбросить</a>
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- Список промокодов -->
+        <div class="card">
+            <div class="card-body">
+                <table class="table table-striped">
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Промокод</th>
+                            <th>Скидка</th>
+                            <th>Статус</th>
+                            <th>Активен</th>
+                            <th>Создан</th>
+                            <th>Использован</th>
+                            <th>Действия</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for promocode in promocodes %}
+                        <tr>
+                            <td>{{ promocode.id }}</td>
+                            <td><code>{{ promocode.code }}</code></td>
+                            <td>{{ promocode.discount_amount }}₽</td>
+                            <td>
+                                {% if promocode.is_used %}
+                                    <span class="badge bg-warning">Использован</span>
+                                {% else %}
+                                    <span class="badge bg-success">Доступен</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if promocode.is_active %}
+                                    <span class="badge bg-success">Активен</span>
+                                {% else %}
+                                    <span class="badge bg-danger">Неактивен</span>
+                                {% endif %}
+                            </td>
+                            <td>{{ promocode.created_at.strftime('%d.%m.%Y %H:%M') if promocode.created_at else '-' }}</td>
+                            <td>{{ promocode.used_at.strftime('%d.%m.%Y %H:%M') if promocode.used_at else '-' }}</td>
+                            <td>
+                                {% if not promocode.is_used and promocode.is_active %}
+                                <form method="post" action="/admin/promocodes/{{ promocode.id }}/deactivate" class="d-inline">
+                                    <button type="submit" class="btn btn-sm btn-danger" 
+                                            onclick="return confirm('Деактивировать промокод?')">
+                                        Деактивировать
+                                    </button>
+                                </form>
+                                {% elif not promocode.is_used and not promocode.is_active %}
+                                <form method="post" action="/admin/promocodes/{{ promocode.id }}/activate" class="d-inline">
+                                    <button type="submit" class="btn btn-sm btn-success">
+                                        Активировать
+                                    </button>
+                                </form>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% else %}
+                        <tr>
+                            <td colspan="8" class="text-center">Промокоды не найдены</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Модальное окно для добавления промокодов -->
+<div class="modal fade" id="addPromocodesModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Добавить промокоды</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form method="post" action="/admin/promocodes/add">
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label for="discount_amount" class="form-label">Размер скидки</label>
+                        <select name="discount_amount" id="discount_amount" class="form-select" required>
+                            <option value="">Выберите размер скидки</option>
+                            <option value="200">200₽</option>
+                            <option value="500">500₽</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label for="codes" class="form-label">Промокоды (каждый с новой строки)</label>
+                        <textarea name="codes" id="codes" class="form-control" rows="10" 
+                                  placeholder="PROMO200-001&#10;PROMO200-002&#10;PROMO200-003" required></textarea>
+                        <div class="form-text">Введите промокоды, каждый с новой строки</div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+                    <button type="submit" class="btn btn-primary">Добавить промокоды</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+{% if message %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        alert('{{ message }}');
+    });
+</script>
+{% endif %}
+
+{% endblock %} 

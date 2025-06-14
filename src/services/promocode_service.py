@@ -260,10 +260,49 @@ class PromoCodeService:
             }
 
     @staticmethod
+    async def activate_promocode(session: AsyncSession, promocode_id: int) -> dict:
+        """
+        Активирует промокод
+
+        Args:
+            session: Сессия базы данных
+            promocode_id: ID промокода
+
+        Returns:
+            dict: Результат операции
+        """
+        try:
+            query = await session.execute(
+                select(Promocode).where(Promocode.id == promocode_id)
+            )
+            promocode = query.scalars().first()
+
+            if not promocode:
+                return {"success": False, "error": "Промокод не найден"}
+
+            promocode.is_active = True
+            await session.commit()
+
+            logger.info(f"Промокод {promocode.code} активирован")
+            return {
+                "success": True,
+                "message": f"Промокод {promocode.code} активирован",
+            }
+
+        except Exception as e:
+            await session.rollback()
+            logger.error(f"Ошибка при активации промокода: {str(e)}")
+            return {
+                "success": False,
+                "error": f"Ошибка при активации промокода: {str(e)}",
+            }
+
+    @staticmethod
     async def get_promocodes_list(
         session: AsyncSession,
         discount_amount: Optional[int] = None,
         is_used: Optional[bool] = None,
+        is_active: Optional[bool] = None,
         limit: int = 50,
     ) -> List[Promocode]:
         """
@@ -273,6 +312,7 @@ class PromoCodeService:
             session: Сессия базы данных
             discount_amount: Размер скидки для фильтрации (опционально)
             is_used: Статус использования для фильтрации (опционально)
+            is_active: Статус активности для фильтрации (опционально)
             limit: Максимальное количество промокодов
 
         Returns:
@@ -286,6 +326,8 @@ class PromoCodeService:
                 conditions.append(Promocode.discount_amount == discount_amount)
             if is_used is not None:
                 conditions.append(Promocode.is_used == is_used)
+            if is_active is not None:
+                conditions.append(Promocode.is_active == is_active)
 
             if conditions:
                 query = query.where(and_(*conditions))

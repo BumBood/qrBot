@@ -5,6 +5,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy.ext.asyncio import AsyncSession
 from models.user_model import User
 from logger import logger
+from urllib.parse import parse_qs
 
 # Создаем роутер для базовых команд
 router = Router()
@@ -20,7 +21,6 @@ def get_main_menu_keyboard():
     builder.button(text="📦 О продукции «Айсида»", callback_data="about_aisida")
     builder.button(text="📝 Мои чеки", callback_data="my_receipts")
     builder.button(text="🎁 Еженедельный розыгрыш OZON", callback_data="weekly_lottery")
-    builder.button(text="🏆 Розыгрыш Главного приза", callback_data="lottery")
     builder.button(text="❓ Частые вопросы", callback_data="faq")
     builder.adjust(1)  # По одной кнопке в ряду
     return builder.as_markup()
@@ -48,8 +48,13 @@ async def cmd_start(message: Message, session: AsyncSession):
     utm = parts[1].strip() if len(parts) > 1 else None
     if utm:
         user = await session.get(User, message.from_user.id)
-        if user and not user.utm:
-            user.utm = utm
+        if user and not (user.utm_source or user.utm_medium or user.utm_campaign):
+            # Поддержка UTM-меток, разделённых дефисами (replace '-utm_' на '&utm_')
+            utm_clean = utm.replace("-utm_", "&utm_")
+            params = parse_qs(utm_clean)
+            user.utm_source = params.get("utm_source", [None])[0]
+            user.utm_medium = params.get("utm_medium", [None])[0]
+            user.utm_campaign = params.get("utm_campaign", [None])[0]
             await session.commit()
     await message.answer(
         "👋 Добро пожаловать в бот для учета покупок и проверки чеков!\n\n"

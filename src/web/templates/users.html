@@ -4,14 +4,11 @@
 {% if request.query_params.get('message') %}
 <div class="alert alert-info">{{ request.query_params.get('message') }}</div>
 {% endif %}
-<form action="/admin/weekly_lottery" method="get" class="mb-4">
-    <button type="submit" class="btn btn-primary">Провести еженедельную лотерею</button>
-</form>
 <div class="table-responsive">
 <table class="table table-hover table-bordered">
 <thead>
 <tr>
-    <th>ID</th><th>Username</th><th>Имя</th><th>UTM</th><th>Зарегистрирован</th>
+    <th>ID</th><th>Username</th><th>Имя</th><th>UTM Source</th><th>UTM Medium</th><th>UTM Campaign</th><th>Зарегистрирован</th><th>Добавил чек</th>
 </tr>
 </thead>
 <tbody>
@@ -20,14 +17,18 @@
   <td>{{ u.id }}</td>
   <td>{{ u.username or '' }}</td>
   <td>{{ u.full_name }}</td>
-  <td>{{ u.utm or '' }}</td>
+  <td>{{ u.utm_source or '' }}</td>
+  <td>{{ u.utm_medium or '' }}</td>
+  <td>{{ u.utm_campaign or '' }}</td>
   <td>{{ u.registered_at.strftime("%Y-%m-%d %H:%M") }}</td>
+  <td>{{ 'да' if receipt_counts.get(u.id, 0) > 0 else 'нет' }} ({{ receipt_counts.get(u.id, 0) }})</td>
 </tr>
 {% endfor %}
 </tbody>
 </table>
 </div>
 <h2 class="mt-5">Статистика UTM</h2>
+<a href="/admin/users/utm_export" class="btn btn-sm btn-success mb-3">Выгрузить статистику UTM в Excel</a>
 <div class="table-responsive">
 <table class="table table-sm">
 <thead><tr><th>UTM</th><th>Количество</th></tr></thead>

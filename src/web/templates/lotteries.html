@@ -1,6 +1,9 @@
 {% extends "base.html" %}
 {% block content %}
 <h1 class="mb-4">История розыгрышей</h1>
+<form action="/admin/weekly_lottery" method="get" class="mb-4">
+    <button type="submit" class="btn btn-primary">Провести еженедельную лотерею</button>
+</form>
 <div class="table-responsive">
 <table class="table table-striped table-bordered">
 <thead>
@@ -12,7 +15,9 @@
   <th>Победитель (User ID)</th>
   <th>Чек победителя</th>
   <th>Сумма приза</th>
+  <th>Контакт</th>
   <th>Уведомление</th>
+  <th>Действия</th>
 </tr>
 </thead>
 <tbody>
@@ -25,7 +30,25 @@
   <td>{{ l.winner_user_id or '' }}</td>
   <td><a href="/admin/receipts/{{ l.winner_receipt_id }}">{{ l.winner_receipt_id or '' }}</a></td>
   <td>{{ l.prize_amount }}</td>
+  <td>
+    <form action="/admin/lotteries/{{ l.id }}/update_contact" method="post" class="form-inline">
+      <input type="text" name="contact_info" value="{{ l.contact_info }}" class="form-control form-control-sm" style="width:150px; display:inline-block;" />
+      <button type="submit" class="btn btn-sm btn-primary">Сохранить</button>
+    </form>
+  </td>
   <td>{{ 'Да' if l.notification_sent else 'Нет' }}</td>
+  <td>
+    {% if not l.notification_sent %}
+    <form action="/admin/lotteries/{{ l.id }}/confirm" method="post" style="display:inline-block;">
+      <button type="submit" class="btn btn-sm btn-success">Подтвердить</button>
+    </form>
+    <form action="/admin/lotteries/{{ l.id }}/reroll" method="post" style="display:inline-block; margin-left:5px;">
+      <button type="submit" class="btn btn-sm btn-warning">Переиграть</button>
+    </form>
+    {% else %}
+    Подтверждено
+    {% endif %}
+  </td>
 </tr>
 {% endfor %}
 </tbody>

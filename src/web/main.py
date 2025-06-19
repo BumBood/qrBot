@@ -1,10 +1,10 @@
 import os
 import datetime
 from fastapi import FastAPI, Depends, Request, Form
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from database import async_session
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from models.receipt_model import Receipt
 from models.user_model import User
@@ -166,12 +166,55 @@ async def list_users(
 ):
     result = await session.execute(select(User))
     users = result.scalars().all()
+    # Получаем количество добавленных чеков для каждого пользователя
+    receipt_counts_result = await session.execute(
+        select(Receipt.user_id, func.count(Receipt.id)).group_by(Receipt.user_id)
+    )
+    receipt_counts = {user_id: count for user_id, count in receipt_counts_result.all()}
     utm_counts = {}
     for u in users:
-        key = u.utm or ""
+        key = f"{u.utm_source or ''}|{u.utm_medium or ''}|{u.utm_campaign or ''}"
         utm_counts[key] = utm_counts.get(key, 0) + 1
-    return templates.TemplateResponse(
-        "users.html", {"request": request, "users": users, "utm_counts": utm_counts}
+    response = templates.TemplateResponse(
+        "users.html",
+        {
+            "request": request,
+            "users": users,
+            "utm_counts": utm_counts,
+            "receipt_counts": receipt_counts,
+        },
+    )
+    return response
+
+
+@app.get("/admin/users/utm_export")
+async def export_utm_stats(
+    current_admin: AdminUser = Depends(get_current_admin),
+    session: AsyncSession = Depends(get_db),
+):
+    # Получаем пользователей и считаем статистику UTM
+    result = await session.execute(select(User))
+    users = result.scalars().all()
+    utm_counts = {}
+    for u in users:
+        key = f"{u.utm_source or ''}|{u.utm_medium or ''}|{u.utm_campaign or ''}"
+        utm_counts[key] = utm_counts.get(key, 0) + 1
+
+    import io, csv
+
+    output = io.StringIO()
+    # Добавляем BOM для корректного открытия в Excel с кодировкой UTF-8
+    output.write("\ufeff")
+    writer = csv.writer(output, delimiter=";")
+    writer.writerow(["utm_source", "utm_medium", "utm_campaign", "count"])
+    for utm_str, count in utm_counts.items():
+        source, medium, campaign = utm_str.split("|")
+        writer.writerow([source, medium, campaign, count])
+    output.seek(0)
+    return StreamingResponse(
+        output,
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=utm_stats.csv"},
     )
 
 
@@ -374,3 +417,92 @@ async def activate_promocode(
 
     message = result.get("message", result.get("error", "Неизвестная ошибка"))
     return RedirectResponse(url=f"/admin/promocodes?message={message}", status_code=303)
+
+
+# Новый endpoint для обновления контакта победителя недельного розыгрыша
+@app.post("/admin/lotteries/{lottery_id}/update_contact")
+async def update_lottery_contact(
+    lottery_id: int,
+    contact_info: str = Form(...),
+    current_admin: AdminUser = Depends(get_current_admin),
+    session: AsyncSession = Depends(get_db),
+):
+    from models.weekly_lottery_model import WeeklyLottery
+
+    lottery = await session.get(WeeklyLottery, lottery_id)
+    if lottery:
+        lottery.contact_info = contact_info
+        await session.commit()
+    return RedirectResponse(url="/admin/lotteries", status_code=303)
+
+
+@app.post("/admin/lotteries/{lottery_id}/confirm")
+async def confirm_weekly_lottery(
+    lottery_id: int,
+    current_admin: AdminUser = Depends(get_current_admin),
+    session: AsyncSession = Depends(get_db),
+):
+    from models.weekly_lottery_model import WeeklyLottery
+    from services.weekly_lottery_service import WeeklyLotteryService
+    from aiogram import Bot
+    from config import BOT_TOKEN
+
+    lottery = await session.get(WeeklyLottery, lottery_id)
+    if not lottery or lottery.notification_sent:
+        return RedirectResponse(url="/admin/lotteries", status_code=303)
+
+    # Отправляем уведомления победителю и участникам
+    bot = Bot(token=BOT_TOKEN)
+    async with bot:
+        # Победитель
+        await WeeklyLotteryService.notify_winner(session, bot, lottery)
+        # Участники недели
+        receipts = await WeeklyLotteryService.get_eligible_receipts(
+            session, lottery.week_start, lottery.week_end
+        )
+        user_ids = {r.user_id for r in receipts if r.user_id != lottery.winner_user_id}
+        for user_id in user_ids:
+            try:
+                await bot.send_message(
+                    user_id,
+                    f"Розыгрыш за неделю "
+                    f"{lottery.week_start.strftime('%Y-%m-%d')} - "
+                    f"{lottery.week_end.strftime('%Y-%m-%d')} завершён! "
+                    f"Победитель: пользователь {lottery.winner_user_id}",
+                )
+            except Exception:
+                pass
+
+    # Помечаем как уведомленный и запрещаем повтор
+    lottery.notification_sent = True
+    await session.commit()
+    return RedirectResponse(url="/admin/lotteries", status_code=303)
+
+
+@app.post("/admin/lotteries/{lottery_id}/reroll")
+async def reroll_weekly_lottery(
+    lottery_id: int,
+    current_admin: AdminUser = Depends(get_current_admin),
+    session: AsyncSession = Depends(get_db),
+):
+    from models.weekly_lottery_model import WeeklyLottery
+    from services.weekly_lottery_service import WeeklyLotteryService
+    import random
+
+    lottery = await session.get(WeeklyLottery, lottery_id)
+    if not lottery or lottery.notification_sent:
+        return RedirectResponse(url="/admin/lotteries", status_code=303)
+
+    # Получаем подходящие чеки недели, исключаем текущий
+    receipts = await WeeklyLotteryService.get_eligible_receipts(
+        session, lottery.week_start, lottery.week_end
+    )
+    candidates = [r for r in receipts if r.id != lottery.winner_receipt_id]
+    if not candidates:
+        return RedirectResponse(url="/admin/lotteries", status_code=303)
+
+    winner_receipt = random.choice(candidates)
+    lottery.winner_receipt_id = winner_receipt.id
+    lottery.winner_user_id = winner_receipt.user_id
+    await session.commit()
+    return RedirectResponse(url="/admin/lotteries", status_code=303)

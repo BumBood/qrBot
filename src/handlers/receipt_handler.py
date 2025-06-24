@@ -7,6 +7,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.receipt_model import Receipt
@@ -394,9 +395,10 @@ async def callback_my_receipts(
     """
     user_id = callback.from_user.id
 
-    # Получаем последние 3 чека пользователя
+    # Получаем последние 3 чека пользователя, включая призы
     receipts_query = await session.execute(
         select(Receipt)
+        .options(selectinload(Receipt.prizes))
         .where(Receipt.user_id == user_id)
         .order_by(Receipt.created_at.desc())
         .limit(3)

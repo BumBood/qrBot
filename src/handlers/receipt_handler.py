@@ -423,8 +423,9 @@ async def callback_my_receipts(
         status_text = ""
         if receipt.status == "verified":
             status_text = "Подтверждён"
-            if receipt.prize_code:
-                status_text += f", подарок: промокод {receipt.prize_value} ₽"
+            if receipt.prizes:
+                prize = receipt.prizes[0]
+                status_text += f", подарок: промокод {prize.discount_amount} ₽"
         elif receipt.status == "pending":
             status_text = "Ожидает проверки"
         elif receipt.status == "rejected":

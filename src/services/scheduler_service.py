@@ -24,7 +24,8 @@ class LotteryScheduler:
             logger.info("Запуск автоматического еженедельного розыгрыша")
 
             async with async_session() as session:
-                result = await weekly_lottery_service.conduct_lottery(session, self.bot)
+                # Проводим розыгрыш без отправки уведомлений, администратор подтвердит вручную
+                result = await weekly_lottery_service.conduct_lottery(session)
 
                 if result["success"]:
                     if result.get("winner"):

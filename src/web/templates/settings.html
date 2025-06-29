@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="row">
+    <div class="col-6">
+        <h2>Настройки промокода акции</h2>
+        <form method="post" action="/admin/settings">
+            {% if message %}
+            <div class="alert alert-success">{{ message }}</div>
+            {% endif %}
+            <div class="mb-3">
+                <label for="code" class="form-label">Текст промокода</label>
+                <input type="text" class="form-control" id="code" name="code" value="{{ setting.code if setting else '' }}" required />
+            </div>
+            <div class="mb-3">
+                <label for="discount_single" class="form-label">Скидка при покупке 1 средства (руб)</label>
+                <input type="number" class="form-control" id="discount_single" name="discount_single" value="{{ setting.discount_single if setting else '' }}" required />
+            </div>
+            <div class="mb-3">
+                <label for="discount_multi" class="form-label">Скидка при покупке 2+ средств (руб)</label>
+                <input type="number" class="form-control" id="discount_multi" name="discount_multi" value="{{ setting.discount_multi if setting else '' }}" required />
+            </div>
+            <button type="submit" class="btn btn-primary">Сохранить</button>
+        </form>
+    </div>
+</div>
+{% endblock %} 

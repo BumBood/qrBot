@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from models.receipt_model import Receipt
 from models.user_model import User
 from models.promocode_model import Promocode
+from models.promo_setting_model import PromoSetting
 from services.lottery_service import select_winner, notify_winner, notify_participants
 from services.weekly_lottery_service import WeeklyLotteryService
 from services.promocode_service import promocode_service
@@ -506,3 +507,47 @@ async def reroll_weekly_lottery(
     lottery.winner_user_id = winner_receipt.user_id
     await session.commit()
     return RedirectResponse(url="/admin/lotteries", status_code=303)
+
+
+@app.get("/admin/settings", response_class=HTMLResponse)
+async def settings(
+    request: Request,
+    current_admin: AdminUser = Depends(get_current_admin),
+    session: AsyncSession = Depends(get_db),
+    message: str = None,
+):
+    # Получаем текущие настройки промокода акции
+    result = await session.execute(select(PromoSetting))
+    setting = result.scalars().first()
+    return templates.TemplateResponse(
+        "settings.html",
+        {"request": request, "setting": setting, "message": message},
+    )
+
+
+@app.post("/admin/settings")
+async def update_settings(
+    request: Request,
+    code: str = Form(...),
+    discount_single: int = Form(...),
+    discount_multi: int = Form(...),
+    current_admin: AdminUser = Depends(get_current_admin),
+    session: AsyncSession = Depends(get_db),
+):
+    # Обновляем настройки промокода акции
+    result = await session.execute(select(PromoSetting))
+    setting = result.scalars().first()
+    if not setting:
+        setting = PromoSetting(
+            code=code,
+            discount_single=discount_single,
+            discount_multi=discount_multi,
+        )
+        session.add(setting)
+    else:
+        setting.code = code
+        setting.discount_single = discount_single
+        setting.discount_multi = discount_multi
+    await session.commit()
+    message = "Настройки промокода успешно обновлены"
+    return RedirectResponse(url=f"/admin/settings?message={message}", status_code=303)

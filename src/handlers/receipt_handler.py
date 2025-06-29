@@ -16,7 +16,6 @@ from services.receipt_service import (
     process_manual_receipt,
     verify_receipt_with_api,
 )
-from services.prize_service import issue_prize
 from logger import logger
 from handlers.base_handler import get_main_menu_keyboard
 
@@ -70,7 +69,9 @@ async def callback_register_receipt(callback: CallbackQuery, state: FSMContext):
     Обрабатывает нажатие на кнопку "Зарегистрировать покупку"
     """
     await callback.message.edit_text(
-        "Выберите способ регистрации чека:", reply_markup=get_receipt_method_keyboard()
+        "Отлично! Чтобы подтвердить покупку, отправьте фото чека «Планеты Здоровья» с QR-кодом,\n"
+        "или введите данные чека вручную (ФН, ФД, ФПД и сумма).",
+        reply_markup=get_receipt_method_keyboard(),
     )
     await callback.answer()
 
@@ -103,6 +104,8 @@ async def process_photo(message: Message, state: FSMContext, session: AsyncSessi
         await message.bot.download(photo, destination=photo_path)
         user_id = message.from_user.id
 
+        # Уведомление о начале распознавания QR-кода
+        wait_msg = await message.answer("Спасибо! Пытаюсь распознать QR-код… ⏳")
         # 1. Получаем данные чека с фото
         result = await process_receipt_photo(user_id, photo_path)
 
@@ -114,41 +117,30 @@ async def process_photo(message: Message, state: FSMContext, session: AsyncSessi
             logger.error(f"Ошибка при удалении временного файла: {str(e)}")
 
         if not result["success"]:
-            await message.answer(
-                f"❌ Не удалось распознать QR-код: {result.get('error', 'Неизвестная ошибка')}\n"
-                f"Пожалуйста, убедитесь, что QR-код хорошо виден на фото, или введите данные вручную.",
-                reply_markup=get_receipt_method_keyboard(),
+            builder = InlineKeyboardBuilder()
+            builder.button(text="Попробовать снова", callback_data="receipt_photo")
+            builder.button(text="Ввести данные вручную", callback_data="receipt_manual")
+            builder.button(text="Назад в меню", callback_data="main_menu")
+            builder.adjust(1)
+            await wait_msg.edit_text(
+                "Не распознал QR-код. Пришлите более чёткое фото или введите данные вручную.",
+                reply_markup=builder.as_markup(),
             )
             await state.clear()
             return
 
-        # 2. Сохраняем данные чека в БД
-        receipt_result = await process_manual_receipt(
-            session,
-            user_id,
-            result["fn"],
-            result["fd"],
-            result["fpd"],
-            result["amount"],
-        )
-        if not receipt_result["success"]:
-            await message.answer(
-                f"❌ Ошибка при регистрации чека: {receipt_result.get('error', 'Неизвестная ошибка')}\n"
-                f"Пожалуйста, попробуйте еще раз.",
-                reply_markup=get_receipt_method_keyboard(),
-            )
-            await state.clear()
-            return
-
-        # 3. Промежуточное сообщение о проверке через API
+        # 3. Получаю данные чека и проверяю через API
         wait_msg = await message.answer(
-            "Проверяю чек через API... ⏳\n\nБот выполняет запрос"
+            f"Получаю данные чека:\n"
+            f"ФН: {result['fn']}\n"
+            f"ФД: {result['fd']}\n"
+            f"ФПД: {result['fpd']}\n"
+            f"Сумма: {result['amount']} ₽\n"
+            "Проверяю чек через API… ⏳"
         )
 
         # 4. Проверяем чек через API
-        verify_result = await verify_receipt_with_api(
-            session, receipt_result["receipt_id"]
-        )
+        verify_result = await verify_receipt_with_api(session, result["receipt_id"])
 
         if not verify_result["success"]:
             # Чек отклонен - выводим подробную информацию
@@ -178,37 +170,18 @@ async def process_photo(message: Message, state: FSMContext, session: AsyncSessi
         date = verify_result.get("date", "Дата неизвестна")
         aisida_count = verify_result.get("aisida_count", 0)
         aisida_items = verify_result.get("aisida_items", [])  # список строк
-        items_str = (
-            "\n".join(f"({item})" for item in aisida_items) if aisida_items else "-"
-        )
+        items_str = ", ".join(aisida_items) if aisida_items else "-"
 
-        # Выдаём подарок в зависимости от количества товаров
-        prize_result = await issue_prize(
-            session, receipt_result["receipt_id"], aisida_count
-        )
-
-        # Формируем подробный текст
+        # Информируем пользователя об участии в еженедельном розыгрыше
         text = (
-            f"✅ Чек подтверждён!\n"
+            f"✔ Чек подтверждён!\n"
             f"Аптека: {pharmacy}, {address}\n"
-            f"Дата/время: {date}\n\n"
-            f"В чеке найдены <b>{aisida_count} позиции «Айсида»</b>.\n"
-            f"{items_str}\n\n"
+            f"Дата/время: {date}\n"
+            f"В чеке найдены {aisida_count} позиции «Айсида». ({items_str})\n\n"
+            "Поздравляем! Теперь вы участвуете в еженедельном розыгрыше сертификата OZON на 5 000 руб.\n"
+            "Результаты розыгрыша мы пришлем вам в понедельник! Удачи!"
         )
-
-        if prize_result["success"]:
-            discount = prize_result["discount_amount"]
-            code = prize_result["code"]
-            text += f"🎁 <b>Ваш подарок: промокод на скидку {discount} руб.</b>\n"
-            text += f"Промокод: <code>{code}</code>\n"
-            text += f"Действует на продукцию Айсида на OZON\n\n"
-            text += f"<i>Промокод можно использовать только один раз.</i>\n"
-        else:
-            text += f"❌ {prize_result.get('error', 'Произошла ошибка при выдаче подарка')}\n"
-
-        await wait_msg.edit_text(
-            text, reply_markup=get_main_menu_keyboard(), parse_mode="HTML"
-        )
+        await wait_msg.edit_text(text, reply_markup=get_main_menu_keyboard())
 
     except Exception as e:
         logger.error(f"Ошибка при обработке фото чека: {str(e)}")
@@ -238,7 +211,7 @@ async def callback_receipt_manual(callback: CallbackQuery, state: FSMContext):
     await callback.message.edit_text(
         "Введите данные чека в формате:\n"
         "ФН ФД ФПД СУММА\n"
-        "Например: 8710000101234567 1234 5678901234 299.50",
+        "Например: 8710000101234567 1234 567890 299.50",
         reply_markup=get_back_keyboard(),
     )
     await state.set_state(ReceiptStates.waiting_for_fn)
@@ -307,8 +280,15 @@ async def process_manual_entry(
 
         user_id = message.from_user.id
 
-        # Сообщение о проверке
-        wait_msg = await message.answer("Проверяю данные чека... ⏳")
+        # 3. Получаю данные чека и проверяю через API
+        wait_msg = await message.answer(
+            f"Получаю данные чека:\n"
+            f"ФН: {fn}\n"
+            f"ФД: {fd}\n"
+            f"ФПД: {fpd}\n"
+            f"Сумма: {amount_val} ₽\n"
+            "Проверяю чек через API… ⏳"
+        )
 
         # Сохраняем данные чека в БД
         receipt_result = await process_manual_receipt(
@@ -342,37 +322,22 @@ async def process_manual_entry(
             await state.clear()
             return
 
-        # Выдаём подарок в зависимости от количества товаров
+        # Информируем пользователя об участии в еженедельном розыгрыше
         aisida_count = verify_result.get("aisida_count", 0)
-        prize_result = await issue_prize(
-            session, receipt_result["receipt_id"], aisida_count
+        aisida_items = verify_result.get("aisida_items", [])
+        items_str = ", ".join(aisida_items) if aisida_items else "-"
+        pharmacy = verify_result.get("pharmacy", "Аптека неизвестна")
+        address = verify_result.get("address", "Адрес неизвестен")
+        date = verify_result.get("date", "Дата неизвестна")
+        text = (
+            f"✔ Чек подтверждён!\n"
+            f"Аптека: {pharmacy}, {address}\n"
+            f"Дата/время: {date}\n"
+            f"В чеке найдены {aisida_count} позиции «Айсида». ({items_str})\n\n"
+            "Поздравляем! Теперь вы участвуете в еженедельном розыгрыше сертификата OZON на 5 000 руб.\n"
+            "Результаты розыгрыша мы пришлем вам в понедельник! Удачи!"
         )
-
-        # Формируем ответ
-        if prize_result["success"]:
-            discount = prize_result["discount_amount"]
-            code = prize_result["code"]
-            await wait_msg.edit_text(
-                f"✅ Чек успешно проверен!\n\n"
-                f"Сумма: {amount_val} руб.\n"
-                f"Количество товаров «Айсида»: {aisida_count}\n\n"
-                f"🎁 <b>Ваш подарок: промокод на скидку {discount} руб.</b>\n"
-                f"Промокод: <code>{code}</code>\n"
-                f"Действует на продукцию Айсида на OZON\n\n"
-                f"<i>Промокод можно использовать только один раз.</i>\n\n"
-                f"Спасибо за покупку!",
-                reply_markup=get_main_menu_keyboard(),
-                parse_mode="HTML",
-            )
-        else:
-            await wait_msg.edit_text(
-                f"✅ Чек успешно проверен!\n\n"
-                f"Сумма: {amount_val} руб.\n"
-                f"Количество товаров «Айсида»: {aisida_count}\n\n"
-                f"❌ {prize_result.get('error', 'Произошла ошибка при выдаче подарка')}\n",
-                reply_markup=get_main_menu_keyboard(),
-                parse_mode="HTML",
-            )
+        await wait_msg.edit_text(text, reply_markup=get_main_menu_keyboard())
 
     except Exception as e:
         logger.error(f"Ошибка при обработке ручного ввода чека: {str(e)}")

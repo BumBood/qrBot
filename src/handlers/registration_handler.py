@@ -3,6 +3,7 @@ from aiogram.types import Message, CallbackQuery
 from aiogram.filters import Command
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from urllib.parse import parse_qs
 
 from models.user_model import User
 from logger import logger
@@ -41,6 +42,18 @@ async def register_user(message: Message, session: AsyncSession) -> User:
             user = User(id=user_id, username=username, full_name=full_name)
             session.add(user)
             logger.info(f"Зарегистрирован новый пользователь: {user_id}")
+            # Сохраняем UTM-метку при первом входе (/start <utm>)
+            text = message.text or ""
+            parts = text.split(maxsplit=1)
+            utm = parts[1].strip() if len(parts) > 1 else None
+            if utm:
+                # Поддержка UTM-меток, разделённых дефисами (replace '-utm_' на '&utm_')
+                utm_clean = utm.replace("-utm_", "&utm_")
+                params = parse_qs(utm_clean)
+                user.utm = utm
+                user.utm_source = params.get("utm_source", [None])[0]
+                user.utm_medium = params.get("utm_medium", [None])[0]
+                user.utm_campaign = params.get("utm_campaign", [None])[0]
 
         # Сохраняем изменения
         await session.commit()

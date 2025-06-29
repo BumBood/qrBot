@@ -16,6 +16,7 @@ async def upgrade():
     Выполняет создание таблицы promo_settings и добавление настроек по умолчанию
     """
     async with engine.begin() as conn:
+        # Создаем таблицу promo_settings
         await conn.execute(
             text(
                 """
@@ -27,12 +28,17 @@ CREATE TABLE IF NOT EXISTS promo_settings (
     created_at TIMESTAMP DEFAULT now(),
     updated_at TIMESTAMP DEFAULT now()
 );
-
--- Добавляем запись с промокодом по умолчанию
+                """
+            )
+        )
+        # Добавляем запись с промокодом по умолчанию, если её ещё нет
+        await conn.execute(
+            text(
+                """
 INSERT INTO promo_settings (code, discount_single, discount_multi)
 SELECT 'ЛЕТО_КРАСОТЫ', 200, 500
 WHERE NOT EXISTS (SELECT 1 FROM promo_settings);
-"""
+                """
             )
         )
 

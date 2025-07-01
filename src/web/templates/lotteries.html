@@ -14,8 +14,9 @@
   <th>Проведён</th>
   <th>Победитель (User ID)</th>
   <th>Чек победителя</th>
+  <th>Контакт пользователя</th>
+  <th>Контакт отправлен</th>
   <th>Сумма приза</th>
-  <th>Контакт</th>
   <th>Уведомление</th>
   <th>Действия</th>
 </tr>
@@ -29,13 +30,9 @@
   <td>{{ l.conducted_at.strftime("%Y-%m-%d %H:%M") if l.conducted_at else '' }}</td>
   <td>{{ l.winner_user_id or '' }}</td>
   <td><a href="/admin/receipts/{{ l.winner_receipt_id }}">{{ l.winner_receipt_id or '' }}</a></td>
+  <td>{{ l.contact_info or '-' }}</td>
+  <td>{{ 'Да' if l.contact_sent else 'Нет' }}</td>
   <td>{{ l.prize_amount }}</td>
-  <td>
-    <form action="/admin/lotteries/{{ l.id }}/update_contact" method="post" class="form-inline">
-      <input type="text" name="contact_info" value="{{ l.contact_info }}" class="form-control form-control-sm" style="width:150px; display:inline-block;" />
-      <button type="submit" class="btn btn-sm btn-primary">Сохранить</button>
-    </form>
-  </td>
   <td>{{ 'Да' if l.notification_sent else 'Нет' }}</td>
   <td>
     {% if not l.notification_sent %}

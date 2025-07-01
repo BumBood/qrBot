@@ -69,7 +69,7 @@ async def callback_register_receipt(callback: CallbackQuery, state: FSMContext):
     Обрабатывает нажатие на кнопку "Зарегистрировать покупку"
     """
     await callback.message.edit_text(
-        "Отлично! Чтобы подтвердить покупку, отправьте фото чека «Планеты Здоровья» с QR-кодом,\n"
+        "Отлично! Чтобы подтвердить покупку, отправьте фото чека «Планета Здоровья» с QR-кодом,\n"
         "или введите данные чека вручную (ФН, ФД, ФПД и сумма).",
         reply_markup=get_receipt_method_keyboard(),
     )
@@ -129,6 +129,25 @@ async def process_photo(message: Message, state: FSMContext, session: AsyncSessi
             await state.clear()
             return
 
+        # 2. Сохраняем данные чека в БД
+        receipt_result = await process_manual_receipt(
+            session,
+            user_id,
+            result["fn"],
+            result["fd"],
+            result["fpd"],
+            result["amount"],
+        )
+        if not receipt_result["success"]:
+            await wait_msg.edit_text(
+                f"❌ Ошибка при регистрации чека: {receipt_result.get('error', 'Неизвестная ошибка')}\n"
+                "Пожалуйста, попробуйте еще раз.",
+                reply_markup=get_receipt_method_keyboard(),
+            )
+            await state.clear()
+            return
+        receipt_id = receipt_result["receipt_id"]
+
         # 3. Получаю данные чека и проверяю через API
         wait_msg = await message.answer(
             f"Получаю данные чека:\n"
@@ -140,23 +159,17 @@ async def process_photo(message: Message, state: FSMContext, session: AsyncSessi
         )
 
         # 4. Проверяем чек через API
-        verify_result = await verify_receipt_with_api(session, result["receipt_id"])
+        verify_result = await verify_receipt_with_api(session, receipt_id)
 
         if not verify_result["success"]:
-            # Чек отклонен - выводим подробную информацию
-            error_message = verify_result.get("error", "Неизвестная ошибка")
-
             builder = InlineKeyboardBuilder()
             builder.button(text="Попробовать снова", callback_data="receipt_photo")
-            builder.button(text="Ввести данные вручную", callback_data="receipt_manual")
             builder.button(text="Назад в меню", callback_data="main_menu")
             builder.adjust(1)
 
             await wait_msg.edit_text(
-                f"❌ <b>Чек отклонен</b>\n\n"
-                f"Причина: {error_message}\n\n"
-                f"Проверьте правильность данных чека и попробуйте снова. "
-                f"Статус чека автоматически изменен на 'отклонен'.",
+                "К сожалению, этот чек не прошёл проверку (данные ФНС не совпадают).\n"
+                "Проверьте данные и попробуйте снова.",
                 reply_markup=builder.as_markup(),
                 parse_mode="HTML",
             )
@@ -174,14 +187,16 @@ async def process_photo(message: Message, state: FSMContext, session: AsyncSessi
 
         # Информируем пользователя об участии в еженедельном розыгрыше
         text = (
-            f"✔ Чек подтверждён!\n"
+            "✔ Чек подтверждён!\n\n"
             f"Аптека: {pharmacy}, {address}\n"
-            f"Дата/время: {date}\n"
-            f"В чеке найдены {aisida_count} позиции «Айсида». ({items_str})\n\n"
-            "Поздравляем! Теперь вы участвуете в еженедельном розыгрыше сертификата OZON на 5 000 руб.\n"
-            "Результаты розыгрыша мы пришлем вам в понедельник! Удачи!"
+            f"Дата/время: {date}\n\n"
+            f"В чеке найдены <b>{aisida_count} позиции «Айсида»</b>. ({items_str})\n\n"
+            "Поздравляем! Теперь вы участвуете в еженедельном розыгрыше сертификата <b>OZON на 5000 руб.</b>\n"
+            "Результаты розыгрыша мы пришлём вам в понедельник! Удачи!"
         )
-        await wait_msg.edit_text(text, reply_markup=get_main_menu_keyboard())
+        await wait_msg.edit_text(
+            text, reply_markup=get_main_menu_keyboard(), parse_mode="HTML"
+        )
 
     except Exception as e:
         logger.error(f"Ошибка при обработке фото чека: {str(e)}")
@@ -242,7 +257,7 @@ async def process_manual_entry(
         parts = text.split()
         if len(parts) != 4:
             await message.answer(
-                "Данные введены неверно. Убедитесь, что ФН (16 или 17 цифр), ФД (4–6 цифр), ФПД (10 цифр) и сумма (xxx.xx), разделённые пробелом.\n"
+                "Данные введены неверно. Убедитесь, что ФН (16 цифр), ФД (4–6 цифр), ФПД (10 цифр) и сумма (xxx.xx), разделённые пробелом.\n"
                 "Попробуйте снова или пришлите фото чека.",
                 reply_markup=get_manual_entry_keyboard(),
             )
@@ -257,7 +272,7 @@ async def process_manual_entry(
             or not re.match(r"^\d+\.\d{2}$", amount)
         ):
             await message.answer(
-                "Данные введены неверно. Убедитесь, что ФН (16 или 17 цифр), ФД (4–6 цифр), ФПД (10 цифр) и сумма (xxx.xx), разделённые пробелом.\n"
+                "Данные введены неверно. Убедитесь, что ФН (16 цифр), ФД (4–6 цифр), ФПД (10 цифр) и сумма (xxx.xx), разделённые пробелом.\n"
                 "Попробуйте снова или пришлите фото чека.",
                 reply_markup=get_manual_entry_keyboard(),
             )
@@ -512,6 +527,17 @@ async def process_receipt_number(
         parse_mode="HTML",
     )
     await state.clear()
+
+
+@router.message(~F.photo, ReceiptStates.waiting_for_photo)
+async def invalid_file_format(message: Message, state: FSMContext):
+    """
+    Обрабатывает ситуацию, когда пользователь отправляет не изображение вместо фото чека
+    """
+    await message.answer(
+        "Файл не соответствует требованиям, пожалуйста прикрепите изображение.",
+        reply_markup=get_back_keyboard(),
+    )
 
 
 def register_receipt_handlers() -> Router:

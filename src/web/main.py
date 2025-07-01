@@ -444,6 +444,7 @@ async def confirm_weekly_lottery(
     session: AsyncSession = Depends(get_db),
 ):
     from models.weekly_lottery_model import WeeklyLottery
+    from models.user_model import User
     from services.weekly_lottery_service import WeeklyLotteryService
     from aiogram import Bot
     from config import BOT_TOKEN
@@ -455,21 +456,28 @@ async def confirm_weekly_lottery(
     # Отправляем уведомления победителю и участникам
     bot = Bot(token=BOT_TOKEN)
     async with bot:
-        # Победитель
+        # Победитель: запрашиваем контактные данные
         await WeeklyLotteryService.notify_winner(session, bot, lottery)
-        # Участники недели
-        receipts = await WeeklyLotteryService.get_eligible_receipts(
-            session, lottery.week_start, lottery.week_end
+
+        # Всем пользователям (кроме победителя): уведомление о завершении розыгрыша
+        result = await session.execute(select(User))
+        all_users = result.scalars().all()
+        # Получаем username победителя для упоминания
+        winner_user = await session.get(User, lottery.winner_user_id)
+        winner_mention = (
+            f"(@{winner_user.username})" if winner_user and winner_user.username else ""
         )
-        user_ids = {r.user_id for r in receipts if r.user_id != lottery.winner_user_id}
-        for user_id in user_ids:
+        for user in all_users:
+            if user.id == lottery.winner_user_id:
+                continue
             try:
                 await bot.send_message(
-                    user_id,
-                    f"Розыгрыш за неделю "
-                    f"{lottery.week_start.strftime('%Y-%m-%d')} - "
-                    f"{lottery.week_end.strftime('%Y-%m-%d')} завершён! "
-                    f"Победитель: пользователь {lottery.winner_user_id}",
+                    user.id,
+                    (
+                        "Розыгрыш завершён!\n"
+                        f"Победитель: чек № {lottery.winner_receipt_id} {winner_mention}.\n"
+                        "Спасибо за участие! Оставайтесь с «Айсида»."
+                    ),
                 )
             except Exception:
                 pass

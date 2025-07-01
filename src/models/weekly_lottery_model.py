@@ -20,6 +20,9 @@ class WeeklyLottery(Base):
     )  # ID выигрышного чека
     prize_amount = Column(Integer, default=5000)  # Размер приза в рублях
     contact_info = Column(String(100), default="")  # Контакт для связи
+    contact_sent = Column(
+        Boolean, default=False
+    )  # Статус: пользователь отправил контакт или нет
     conducted_at = Column(DateTime, nullable=True)  # Дата проведения розыгрыша
     notification_sent = Column(Boolean, default=False)  # Отправлено ли уведомление
     created_at = Column(DateTime, server_default=func.now())  # Дата создания записи

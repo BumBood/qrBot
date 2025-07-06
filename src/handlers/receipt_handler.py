@@ -185,6 +185,16 @@ async def process_photo(message: Message, state: FSMContext, session: AsyncSessi
         aisida_items = verify_result.get("aisida_items", [])  # список строк
         items_str = ", ".join(aisida_items) if aisida_items else "-"
 
+        # Проверяем требования акции: сеть Планета здоровья и наличие продукции Айсида
+        if not (pharmacy and "планета" in pharmacy.lower() and aisida_count > 0):
+            await wait_msg.edit_text(
+                "К сожалению, ваша покупка не соответствует требованиям акции. Проверьте, что вы загрузили верный чек.\n"
+                "В розыгрыше приза могут участвовать только чеки, полученные в сети аптек «Планета здоровья» в которых есть продукция бренда «Айсида».",
+                reply_markup=get_main_menu_keyboard(),
+            )
+            await state.clear()
+            return
+
         # Информируем пользователя об участии в еженедельном розыгрыше
         text = (
             "✔ Чек подтверждён!\n\n"
@@ -257,7 +267,7 @@ async def process_manual_entry(
         parts = text.split()
         if len(parts) != 4:
             await message.answer(
-                "Данные введены неверно. Убедитесь, что ФН (16 цифр), ФД (4–6 цифр), ФПД (10 цифр) и сумма (xxx.xx), разделённые пробелом.\n"
+                "Данные введены неверно. Убедитесь, что ФН (16–17 цифр), ФД (4–6 цифр), ФПД (1–15 цифр) и сумма (xxx.xx или целое число), разделённые пробелом.\n"
                 "Попробуйте снова или пришлите фото чека.",
                 reply_markup=get_manual_entry_keyboard(),
             )
@@ -268,11 +278,11 @@ async def process_manual_entry(
         if (
             not re.match(r"^\d{16,17}$", fn)
             or not re.match(r"^\d{4,6}$", fd)
-            or not re.match(r"^\d{10}$", fpd)
-            or not re.match(r"^\d+\.\d{2}$", amount)
+            or not re.match(r"^\d{1,15}$", fpd)
+            or not re.match(r"^\d+(\.\d{2})?$", amount)
         ):
             await message.answer(
-                "Данные введены неверно. Убедитесь, что ФН (16 цифр), ФД (4–6 цифр), ФПД (10 цифр) и сумма (xxx.xx), разделённые пробелом.\n"
+                "Данные введены неверно. Убедитесь, что ФН (16–17 цифр), ФД (4–6 цифр), ФПД (1–15 цифр) и сумма (xxx.xx или целое число), разделённые пробелом.\n"
                 "Попробуйте снова или пришлите фото чека.",
                 reply_markup=get_manual_entry_keyboard(),
             )
@@ -286,7 +296,7 @@ async def process_manual_entry(
         except Exception as e:
             logger.error(f"Ошибка при преобразовании суммы: {str(e)}")
             await message.answer(
-                "Данные введены неверно. Убедитесь, что сумма указана в формате xxx.xx.\n"
+                "Данные введены неверно. Убедитесь, что сумма указана в формате xxx.xx или как целое число.\n"
                 "Попробуйте снова или пришлите фото чека.",
                 reply_markup=get_manual_entry_keyboard(),
             )
@@ -337,13 +347,25 @@ async def process_manual_entry(
             await state.clear()
             return
 
-        # Информируем пользователя об участии в еженедельном розыгрыше
+        # Достаём данные для проверки акционных условий
+        pharmacy = verify_result.get("pharmacy", "Аптека неизвестна")
         aisida_count = verify_result.get("aisida_count", 0)
         aisida_items = verify_result.get("aisida_items", [])
         items_str = ", ".join(aisida_items) if aisida_items else "-"
-        pharmacy = verify_result.get("pharmacy", "Аптека неизвестна")
         address = verify_result.get("address", "Адрес неизвестен")
         date = verify_result.get("date", "Дата неизвестна")
+
+        # Проверяем требования акции: сеть Планета здоровья и наличие продукции Айсида
+        if not ("планета" in pharmacy.lower() and aisida_count > 0):
+            await wait_msg.edit_text(
+                "К сожалению, ваша покупка не соответствует требованиям акции. Проверьте, что вы загрузили верный чек.\n"
+                "В розыгрыше приза могут участвовать только чеки, полученные в сети аптек «Планета здоровья» в которых есть продукция бренда «Айсида».",
+                reply_markup=get_main_menu_keyboard(),
+            )
+            await state.clear()
+            return
+
+        # Информируем пользователя об участии в еженедельном розыгрыше
         text = (
             f"✔ Чек подтверждён!\n"
             f"Аптека: {pharmacy}, {address}\n"

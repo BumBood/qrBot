@@ -58,6 +58,8 @@ class WeeklyLotteryService:
                         Receipt.status == "verified",
                         Receipt.created_at >= week_start,
                         Receipt.created_at <= week_end,
+                        Receipt.pharmacy.ilike("%планета%"),
+                        Receipt.items_count > 0,
                     )
                 )
             )

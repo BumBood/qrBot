@@ -9,6 +9,38 @@ from models.receipt_model import Receipt
 from models.user_model import User
 from logger import logger
 
+# Список разрешенных аптек для участия в акции
+ALLOWED_PHARMACY_SUBSTRINGS = [
+    "торро",
+    "грант",
+    "авиценна",
+    "чип",
+    "парк",
+    "лекси",
+    "планета здоровья холдинг",
+    "нпо рэйл",
+    "парацельс",
+    "аджента",
+    "альфа",
+    "восток",
+    "парус",
+    "здравник",
+    "лето",
+    "радуга-16",
+    "кант",
+    "космос",
+    "азон",
+    "реон",
+    "дион",
+    "здоровье",
+    "арктик",
+    "олимп",
+    "нытва-фарм",
+    "рецепты здоровья",
+    "спот",
+    "велс",
+]
+
 
 class WeeklyLotteryService:
     """Сервис для еженедельного розыгрыша сертификатов OZON на 5000 руб"""
@@ -52,25 +84,35 @@ class WeeklyLotteryService:
             list[Receipt]: Список подходящих чеков
         """
         try:
+            # Получаем все подтверждённые чеки за неделю
             query = await session.execute(
                 select(Receipt).where(
                     and_(
                         Receipt.status == "verified",
                         Receipt.created_at >= week_start,
                         Receipt.created_at <= week_end,
-                        Receipt.pharmacy.ilike("%планета%"),
-                        Receipt.items_count > 0,
                     )
                 )
             )
             receipts = query.scalars().all()
-
             logger.info(
                 f"Найдено {len(receipts)} подтверждённых чеков "
                 f"с {week_start.strftime('%d.%m.%Y')} по {week_end.strftime('%d.%m.%Y')}"
             )
-
-            return receipts
+            # Фильтруем по наличию продукции Айсида и разрешённым аптекам
+            eligible = [
+                r
+                for r in receipts
+                if r.items_count > 0
+                and any(
+                    sub in (r.pharmacy or "").lower()
+                    for sub in ALLOWED_PHARMACY_SUBSTRINGS
+                )
+            ]
+            logger.info(
+                f"После фильтрации осталось {len(eligible)} подходящих чеков для розыгрыша"
+            )
+            return eligible
 
         except Exception as e:
             logger.error(f"Ошибка при получении подходящих чеков: {str(e)}")

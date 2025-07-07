@@ -22,6 +22,38 @@ from handlers.base_handler import get_main_menu_keyboard
 # Создаем роутер для работы с чеками
 router = Router()
 
+# Список разрешенных аптек для участия в акции
+ALLOWED_PHARMACY_SUBSTRINGS = [
+    "торро",
+    "грант",
+    "авиценна",
+    "чип",
+    "парк",
+    "лекси",
+    "планета здоровья холдинг",
+    "нпо рэйл",
+    "парацельс",
+    "аджента",
+    "альфа",
+    "восток",
+    "парус",
+    "здравник",
+    "лето",
+    "радуга-16",
+    "кант",
+    "космос",
+    "азон",
+    "реон",
+    "дион",
+    "здоровье",
+    "арктик",
+    "олимп",
+    "нытва-фарм",
+    "рецепты здоровья",
+    "спот",
+    "велс",
+]
+
 
 # Состояния для FSM
 class ReceiptStates(StatesGroup):
@@ -185,8 +217,13 @@ async def process_photo(message: Message, state: FSMContext, session: AsyncSessi
         aisida_items = verify_result.get("aisida_items", [])  # список строк
         items_str = ", ".join(aisida_items) if aisida_items else "-"
 
-        # Проверяем требования акции: сеть Планета здоровья и наличие продукции Айсида
-        if not (pharmacy and "планета" in pharmacy.lower() and aisida_count > 0):
+        # Проверяем требования акции: наличие продукции Айсида и разрешённой аптеки
+        if not (
+            aisida_count > 0
+            and any(
+                sub in (pharmacy or "").lower() for sub in ALLOWED_PHARMACY_SUBSTRINGS
+            )
+        ):
             await wait_msg.edit_text(
                 "К сожалению, ваша покупка не соответствует требованиям акции. Проверьте, что вы загрузили верный чек.\n"
                 "В розыгрыше приза могут участвовать только чеки, полученные в сети аптек «Планета здоровья» в которых есть продукция бренда «Айсида».",
@@ -355,8 +392,13 @@ async def process_manual_entry(
         address = verify_result.get("address", "Адрес неизвестен")
         date = verify_result.get("date", "Дата неизвестна")
 
-        # Проверяем требования акции: сеть Планета здоровья и наличие продукции Айсида
-        if not ("планета" in pharmacy.lower() and aisida_count > 0):
+        # Проверяем требования акции: наличие продукции Айсида и разрешённой аптеки
+        if not (
+            aisida_count > 0
+            and any(
+                sub in (pharmacy or "").lower() for sub in ALLOWED_PHARMACY_SUBSTRINGS
+            )
+        ):
             await wait_msg.edit_text(
                 "К сожалению, ваша покупка не соответствует требованиям акции. Проверьте, что вы загрузили верный чек.\n"
                 "В розыгрыше приза могут участвовать только чеки, полученные в сети аптек «Планета здоровья» в которых есть продукция бренда «Айсида».",

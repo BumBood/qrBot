@@ -527,11 +527,13 @@ async def delete_weekly_lottery(
     session: AsyncSession = Depends(get_db),
 ):
     from models.weekly_lottery_model import WeeklyLottery
+    from sqlalchemy import delete as sa_delete
 
-    lottery = await session.get(WeeklyLottery, lottery_id)
-    if lottery:
-        session.delete(lottery)
-        await session.commit()
+    # Удаляем запись через SQL-запрос
+    await session.execute(
+        sa_delete(WeeklyLottery).where(WeeklyLottery.id == lottery_id)
+    )
+    await session.commit()
     return RedirectResponse(url="/admin/lotteries", status_code=303)
 
 

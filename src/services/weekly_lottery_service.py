@@ -69,6 +69,25 @@ class WeeklyLotteryService:
         return prev_monday, prev_sunday
 
     @staticmethod
+    def get_current_week_dates() -> tuple[datetime, datetime]:
+        """
+        Возвращает даты начала и конца текущей недели
+        """
+        today = datetime.now()
+        # Находим понедельник текущей недели
+        current_monday = today - timedelta(days=today.weekday())
+        current_monday = current_monday.replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+
+        # Текущее воскресенье (конец недели)
+        current_sunday = current_monday + timedelta(
+            days=6, hours=23, minutes=59, seconds=59
+        )
+
+        return current_monday, current_sunday
+
+    @staticmethod
     async def get_eligible_receipts(
         session: AsyncSession, week_start: datetime, week_end: datetime
     ) -> list[Receipt]:
@@ -119,24 +138,32 @@ class WeeklyLotteryService:
             return []
 
     @staticmethod
-    async def conduct_lottery(session: AsyncSession, bot=None) -> Dict[str, Any]:
+    async def conduct_lottery(
+        session: AsyncSession, bot=None, *, for_current_week: bool = False
+    ) -> Dict[str, Any]:
         """
         Проводит еженедельный розыгрыш
 
         Args:
             session: Сессия базы данных
             bot: Экземпляр бота для отправки уведомлений
+            for_current_week: Флаг, указывающий на тип недели для розыгрыша
 
         Returns:
             Dict[str, Any]: Результат розыгрыша
         """
         try:
-            # Получаем даты предыдущей недели
-            week_start, week_end = WeeklyLotteryService.get_previous_week_dates()
-
-            logger.info(
-                f"Проводим розыгрыш за неделю {week_start.strftime('%d.%m.%Y')} - {week_end.strftime('%d.%m.%Y')}"
-            )
+            # Выбираем даты в зависимости от типа лотереи
+            if for_current_week:
+                week_start, week_end = WeeklyLotteryService.get_current_week_dates()
+                logger.info(
+                    f"Проводим розыгрыш за текущую неделю {week_start.strftime('%d.%m.%Y')} - {week_end.strftime('%d.%m.%Y')}"
+                )
+            else:
+                week_start, week_end = WeeklyLotteryService.get_previous_week_dates()
+                logger.info(
+                    f"Проводим розыгрыш за предыдущую неделю {week_start.strftime('%d.%m.%Y')} - {week_end.strftime('%d.%m.%Y')}"
+                )
 
             # Проверяем, не проводился ли уже розыгрыш за эту неделю
             existing_lottery = await session.execute(

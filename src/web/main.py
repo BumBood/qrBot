@@ -144,10 +144,13 @@ async def run_main_lottery(
 @app.get("/admin/weekly_lottery")
 async def run_weekly_lottery(
     request: Request,
+    period: str = "past",
     current_admin: AdminUser = Depends(get_current_admin),
     session: AsyncSession = Depends(get_db),
 ):
-    result = await WeeklyLotteryService.conduct_lottery(session)
+    result = await WeeklyLotteryService.conduct_lottery(
+        session, for_current_week=(period == "current")
+    )
     if result["success"]:
         if result.get("winner"):
             w = result["winner"]
@@ -514,6 +517,21 @@ async def reroll_weekly_lottery(
     lottery.winner_receipt_id = winner_receipt.id
     lottery.winner_user_id = winner_receipt.user_id
     await session.commit()
+    return RedirectResponse(url="/admin/lotteries", status_code=303)
+
+
+@app.post("/admin/lotteries/{lottery_id}/delete")
+async def delete_weekly_lottery(
+    lottery_id: int,
+    current_admin: AdminUser = Depends(get_current_admin),
+    session: AsyncSession = Depends(get_db),
+):
+    from models.weekly_lottery_model import WeeklyLottery
+
+    lottery = await session.get(WeeklyLottery, lottery_id)
+    if lottery:
+        session.delete(lottery)
+        await session.commit()
     return RedirectResponse(url="/admin/lotteries", status_code=303)
 
 

@@ -100,11 +100,15 @@ async def callback_register_receipt(callback: CallbackQuery, state: FSMContext):
     """
     Обрабатывает нажатие на кнопку "Зарегистрировать покупку"
     """
-    await callback.message.edit_text(
-        "Отлично! Чтобы подтвердить покупку, отправьте фото чека «Планета Здоровья» с QR-кодом,\n"
-        "или введите данные чека вручную (ФН, ФД, ФПД и сумма).",
-        reply_markup=get_receipt_method_keyboard(),
-    )
+    
+    text = ("Отлично! Чтобы подтвердить покупку, отправьте фото чека «Планета Здоровья» с QR-кодом,\n"
+        "или введите данные чека вручную (ФН, ФД, ФПД и сумма).")
+    
+    if callback.message.photo:
+        await callback.message.answer(text, reply_markup=get_receipt_method_keyboard())
+        await callback.message.delete()
+    else:
+        await callback.message.edit_text(text, reply_markup=get_receipt_method_keyboard())
     await callback.answer()
 
 

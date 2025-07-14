@@ -17,6 +17,8 @@ from starlette.middleware.sessions import SessionMiddleware
 from passlib.context import CryptContext
 from fastapi import HTTPException, status
 from models.admin_model import AdminUser
+from pathlib import Path
+
 
 app = FastAPI()
 app.add_middleware(SessionMiddleware, secret_key="CHANGE_THIS_SECRET_KEY")
@@ -436,6 +438,7 @@ async def update_lottery_contact(
     lottery = await session.get(WeeklyLottery, lottery_id)
     if lottery:
         lottery.contact_info = contact_info
+        lottery.contact_sent = True
         await session.commit()
     return RedirectResponse(url="/admin/lotteries", status_code=303)
 
@@ -451,6 +454,10 @@ async def confirm_weekly_lottery(
     from services.weekly_lottery_service import WeeklyLotteryService
     from aiogram import Bot
     from config import BOT_TOKEN
+    from aiogram.types import FSInputFile
+
+    # Определяем корень проекта для абсолютных путей
+    BASE_DIR = Path(__file__).resolve().parents[2]
 
     lottery = await session.get(WeeklyLottery, lottery_id)
     if not lottery or lottery.notification_sent:
@@ -459,31 +466,45 @@ async def confirm_weekly_lottery(
     # Отправляем уведомления победителю и участникам
     bot = Bot(token=BOT_TOKEN)
     async with bot:
-        # Победитель: запрашиваем контактные данные
-        await WeeklyLotteryService.notify_winner(session, bot, lottery)
+        # Если есть победитель: запрашиваем контактные данные
+        if lottery.winner_user_id:
+            await WeeklyLotteryService.notify_winner(session, bot, lottery)
 
-        # Всем пользователям (кроме победителя): уведомление о завершении розыгрыша
+        # В любом случае уведомляем всех пользователей о завершении розыгрыша
+        # Используем абсолютный путь к файлу картинки
+        photo_path = BASE_DIR / "data" / "pics" / "lottery.png"
+        lottery_photo = FSInputFile(str(photo_path))
         result = await session.execute(select(User))
         all_users = result.scalars().all()
-        # Получаем username победителя для упоминания
-        winner_user = await session.get(User, lottery.winner_user_id)
-        winner_mention = (
-            f"(@{winner_user.username})" if winner_user and winner_user.username else ""
-        )
+        # Формируем текст для участников
+        if lottery.winner_user_id:
+            winner_user = await session.get(User, lottery.winner_user_id)
+            winner_mention = (
+                f"(@{winner_user.username})"
+                if winner_user and winner_user.username
+                else ""
+            )
+            participant_caption = (
+                "Розыгрыш завершён!\n"
+                f"Победитель: чек № {lottery.winner_receipt_id} {winner_mention}.\n"
+                "Спасибо за участие! Оставайтесь с «Айсида»"
+            )
+        else:
+            participant_caption = (
+                "Розыгрыш завершён!\n"
+                "Участников не было.\n"
+                "Спасибо за участие! Оставайтесь с «Айсида»"
+            )
         for user in all_users:
-            if user.id == lottery.winner_user_id:
+            # Не отправляем победителю повторно
+            if lottery.winner_user_id and user.id == lottery.winner_user_id:
                 continue
-            try:
-                await bot.send_message(
-                    user.id,
-                    (
-                        "Розыгрыш завершён!\n"
-                        f"Победитель: чек № {lottery.winner_receipt_id} {winner_mention}.\n"
-                        "Спасибо за участие! Оставайтесь с «Айсида»."
-                    ),
-                )
-            except Exception:
-                pass
+
+            await bot.send_photo(
+                user.id,
+                photo=lottery_photo,
+                caption=participant_caption,
+            )
 
     # Помечаем как уведомленный и запрещаем повтор
     lottery.notification_sent = True

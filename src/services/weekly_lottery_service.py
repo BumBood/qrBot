@@ -8,6 +8,11 @@ from models.weekly_lottery_model import WeeklyLottery
 from models.receipt_model import Receipt
 from models.user_model import User
 from logger import logger
+from aiogram.types import FSInputFile, InlineKeyboardMarkup, InlineKeyboardButton
+from pathlib import Path
+
+# Определяем корневую директорию проекта для абсолютных путей
+BASE_DIR = Path(__file__).resolve().parents[2]
 
 # Список разрешенных аптек для участия в акции
 ALLOWED_PHARMACY_SUBSTRINGS = [
@@ -295,17 +300,32 @@ class WeeklyLotteryService:
 
             # Формируем сообщение
             message = (
-                f"🎉 ПОЗДРАВЛЯЕМ!\n\n"
-                f"Вы стали победителем еженедельного розыгрыша сертификата OZON на {lottery_record.prize_amount} руб.!\n\n"
-                f"📅 Розыгрыш проведён: {lottery_record.conducted_at.strftime('%d.%m.%Y в %H:%M')}\n"
-                f"🧾 Ваш выигрышный чек: №{lottery_record.winner_receipt_id}\n\n"
-                f"Для получения приза с вами свяжется наш менеджер.\n"
-                f"📞 Контакт для связи: {lottery_record.contact_info}\n\n"
-                f"Спасибо за участие в акции!"
+                "🎉 Поздравляем! \n"
+                "Вы выиграли сертификат OZON на 5 000 руб. \n"
+                "📞 Пожалуйста, пришлите номер вашего телефона текстом для связи."
             )
 
-            # Отправляем сообщение
-            await bot.send_message(lottery_record.winner_user_id, message)
+            # Отправляем картинку победителю
+            # Используем абсолютный путь к файлу картинки
+            photo_path = BASE_DIR / "data" / "pics" / "victory.png"
+            photo = FSInputFile(str(photo_path))
+            # Кнопка для запроса контакта
+            markup = InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [
+                        InlineKeyboardButton(
+                            text="Отправить контакт",
+                            callback_data=f"send_contact:{lottery_record.id}",
+                        )
+                    ]
+                ]
+            )
+            await bot.send_photo(
+                lottery_record.winner_user_id,
+                photo=photo,
+                caption=message,
+                reply_markup=markup,
+            )
 
             logger.info(
                 f"Уведомление о победе отправлено пользователю {lottery_record.winner_user_id}"

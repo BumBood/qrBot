@@ -8,6 +8,8 @@ from apscheduler.triggers.cron import CronTrigger
 from services.weekly_lottery_service import weekly_lottery_service
 from database import async_session
 from logger import logger
+from sqlalchemy import select, and_
+from models.weekly_lottery_model import WeeklyLottery
 
 
 class LotteryScheduler:
@@ -48,6 +50,45 @@ class LotteryScheduler:
                 f"Критическая ошибка в задаче еженедельного розыгрыша: {str(e)}"
             )
 
+    async def send_contact_reminders_job(self):
+        """Задача для напоминания пользователям о предоставлении контактных данных победителям"""
+        logger.info(
+            "Запуск задачи напоминания о предоставлении контактных данных победителям"
+        )
+        try:
+            async with async_session() as session:
+                # Вычисляем порог: 1 день назад
+                threshold = datetime.now() - timedelta(days=1)
+                result = await session.execute(
+                    select(WeeklyLottery).where(
+                        and_(
+                            WeeklyLottery.winner_user_id != None,
+                            WeeklyLottery.notification_sent == True,
+                            WeeklyLottery.contact_sent == False,
+                            WeeklyLottery.conducted_at <= threshold,
+                        )
+                    )
+                )
+                lotteries = result.scalars().all()
+                for lottery in lotteries:
+                    try:
+                        message = (
+                            "Мы так и не получили ваши контакты и не можем связаться с вами для выдачи сертификата на 5 000 руб.\n\n"
+                            "📞 Пожалуйста, пришлите номер вашего телефона, чтобы наш менеджер связался с вами для выдачи приза."
+                        )
+                        await self.bot.send_message(lottery.winner_user_id, message)
+                        logger.info(
+                            f"Напоминание отправлено пользователю {lottery.winner_user_id}"
+                        )
+                    except Exception as e:
+                        logger.error(
+                            f"Ошибка при отправке напоминания пользователю {lottery.winner_user_id}: {str(e)}"
+                        )
+        except Exception as e:
+            logger.error(
+                f"Критическая ошибка в задаче напоминания о контакте: {str(e)}"
+            )
+
     def start_scheduler(self):
         """Запускает планировщик задач"""
         if self.is_running:
@@ -63,6 +104,16 @@ class LotteryScheduler:
                 ),  # 0 = понедельник
                 id="weekly_lottery",
                 name="Еженедельный розыгрыш сертификатов OZON",
+                replace_existing=True,
+                max_instances=1,
+            )
+
+            # Добавляем задачу напоминания о предоставлении контактных данных победителям (каждый вторник в 10:00)
+            self.scheduler.add_job(
+                self.send_contact_reminders_job,
+                trigger=CronTrigger(day_of_week=1, hour=11, minute=0),  # 1 = вторник
+                id="contact_reminder",
+                name="Напоминание победителям о предоставлении контактных данных",
                 replace_existing=True,
                 max_instances=1,
             )

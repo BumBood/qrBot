@@ -1,12 +1,18 @@
 from aiogram import Router, F
-from aiogram.types import CallbackQuery
+from aiogram.types import CallbackQuery, Message
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.fsm.context import FSMContext
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, and_
+from models.weekly_lottery_model import WeeklyLottery
 
 from services.weekly_lottery_service import weekly_lottery_service
 from services.scheduler_service import lottery_scheduler
 from handlers.base_handler import get_main_menu_keyboard
 from logger import logger
+
+from aiogram.types import CallbackQuery
 
 # Создаем роутер для еженедельного розыгрыша
 router = Router()
@@ -138,6 +144,58 @@ async def callback_lottery_history(callback: CallbackQuery, session: AsyncSessio
             reply_markup=get_main_menu_keyboard(),
         )
         await callback.answer()
+class ContactLotteryState(StatesGroup):
+    waiting_for_contact = State()
+
+@router.callback_query(lambda c: c.data and c.data.startswith("send_contact"))
+async def callback_send_contact(callback: CallbackQuery, state: FSMContext):
+    """Обрабатывает нажатие кнопки отправки контакта"""
+    await callback.answer()
+    # Убираем кнопку, чтобы не нажимали повторно
+    try:
+        await callback.message.edit_reply_markup(None)
+    except Exception:
+        pass
+    # Просим пользователя прислать контакт текстом
+    await callback.message.answer(
+        "📲 Пожалуйста, введите номер вашего телефона удобным для вас способом (текстом)."
+    )
+    # Устанавливаем состояние ожидания контакта
+    await state.set_state(ContactLotteryState.waiting_for_contact)
+
+
+
+
+
+@router.message(ContactLotteryState.waiting_for_contact)
+async def handle_winner_contact(
+    message: Message, session: AsyncSession, state: FSMContext
+):
+    """
+    Обрабатывает получение контактных данных от победителя еженедельного розыгрыша
+    """
+    # Ищем последнюю лотерею для этого пользователя без контакта
+    result = await session.execute(
+        select(WeeklyLottery)
+        .where(
+            and_(
+                WeeklyLottery.winner_user_id == message.from_user.id,
+                WeeklyLottery.contact_sent == False,
+            )
+        )
+        .order_by(WeeklyLottery.conducted_at.desc())
+        .limit(1)
+    )
+    lottery = result.scalars().first()
+    if lottery:
+        lottery.contact_info = message.text
+        lottery.contact_sent = True
+        await session.commit()
+        await message.answer(
+            "Спасибо! Ваш контакт получен. Ожидайте, менеджер свяжется с вами."
+        )
+        # Завершаем состояние
+        await state.clear()
 
 
 def register_weekly_lottery_handlers() -> Router:

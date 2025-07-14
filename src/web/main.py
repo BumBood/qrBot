@@ -499,13 +499,15 @@ async def confirm_weekly_lottery(
             # Не отправляем победителю повторно
             if lottery.winner_user_id and user.id == lottery.winner_user_id:
                 continue
-
-            await bot.send_photo(
-                user.id,
-                photo=lottery_photo,
-                caption=participant_caption,
-            )
-
+            
+            try:
+                await bot.send_photo(
+                    user.id,
+                    photo=lottery_photo,
+                    caption=participant_caption,
+                )
+            except Exception as e:
+                pass
     # Помечаем как уведомленный и запрещаем повтор
     lottery.notification_sent = True
     await session.commit()

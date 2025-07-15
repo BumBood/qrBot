@@ -57,15 +57,22 @@ class LotteryScheduler:
         )
         try:
             async with async_session() as session:
-                # Вычисляем порог: 1 день назад
+                # Вычисляем дату ровно один день назад
                 threshold = datetime.now() - timedelta(days=1)
+                reminder_date = threshold.date()
+                # Определяем границы дня (00:00 – 23:59:59)
+                from datetime import time
+
+                day_start = datetime.combine(reminder_date, time.min)
+                day_end = datetime.combine(reminder_date, time.max)
                 result = await session.execute(
                     select(WeeklyLottery).where(
                         and_(
                             WeeklyLottery.winner_user_id != None,
                             WeeklyLottery.notification_sent == True,
                             WeeklyLottery.contact_sent == False,
-                            WeeklyLottery.conducted_at <= threshold,
+                            WeeklyLottery.conducted_at >= day_start,
+                            WeeklyLottery.conducted_at <= day_end,
                         )
                     )
                 )

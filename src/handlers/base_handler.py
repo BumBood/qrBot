@@ -49,8 +49,8 @@ async def cmd_start(message: Message, session: AsyncSession):
     code = setting.code if setting else "ЛЕТО_КРАСОТЫ"
     # Текст приветствия и инструкции по акции
     message_text = f"""<b>Ваша скидка при онлайн-покупке средств «Айсида»:</b>
-<b>{setting.discount_single} ₽</b> — при покупке 1 средства, с промо-кодом {code}
-<b>{setting.discount_multi} ₽</b> — при покупке 2 и более средств, с промо-кодом {code}
+<b>{setting.discount_single} ₽</b> — при покупке 1 средства, с промо-кодом <b>АЙСИДА200</b>
+<b>{setting.discount_multi} ₽</b> — при покупке 2 и более средств, с промо-кодом <b>АЙСИДА500</b>
 
 <b>Где применить промо-код:</b>
 На сайте «Планета Здоровья»

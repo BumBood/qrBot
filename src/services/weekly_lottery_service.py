@@ -14,37 +14,7 @@ from pathlib import Path
 # Определяем корневую директорию проекта для абсолютных путей
 BASE_DIR = Path(__file__).resolve().parents[2]
 
-# Список разрешенных аптек для участия в акции
-ALLOWED_PHARMACY_SUBSTRINGS = [
-    "торро",
-    "грант",
-    "авиценна",
-    "чип",
-    "парк",
-    "лекси",
-    "планета здоровья холдинг",
-    "нпо рэйл",
-    "парацельс",
-    "аджента",
-    "альфа",
-    "восток",
-    "парус",
-    "здравник",
-    "лето",
-    "радуга-16",
-    "кант",
-    "космос",
-    "азон",
-    "реон",
-    "дион",
-    "здоровье",
-    "арктик",
-    "олимп",
-    "нытва-фарм",
-    "рецепты здоровья",
-    "спот",
-    "велс",
-]
+# Убрана проверка аптек: остаётся только наличие товаров «Айсида»
 
 
 class WeeklyLotteryService:
@@ -123,16 +93,8 @@ class WeeklyLotteryService:
                 f"Найдено {len(receipts)} подтверждённых чеков "
                 f"с {week_start.strftime('%d.%m.%Y')} по {week_end.strftime('%d.%m.%Y')}"
             )
-            # Фильтруем по наличию продукции Айсида и разрешённым аптекам
-            eligible = [
-                r
-                for r in receipts
-                if r.items_count > 0
-                and any(
-                    sub in (r.pharmacy or "").lower()
-                    for sub in ALLOWED_PHARMACY_SUBSTRINGS
-                )
-            ]
+            # Фильтруем по наличию продукции «Айсида»
+            eligible = [r for r in receipts if r.items_count > 0]
             logger.info(
                 f"После фильтрации осталось {len(eligible)} подходящих чеков для розыгрыша"
             )

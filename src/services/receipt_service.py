@@ -409,15 +409,17 @@ async def verify_receipt_with_api(session: AsyncSession, receipt_id: int) -> dic
         address = check_data.get("retailPlaceAddress")
         if address:
             receipt.address = address
-        # Извлекаем время из ответа API
+        # Извлекаем время из ответа API и сохраняем отформатированную строку
         raw_date = check_data.get("dateTime")
+        parsed_dt = None
         if raw_date:
             try:
-                dt = datetime.fromisoformat(raw_date)
-                date_formatted = dt.strftime("%d.%m.%Y %H:%M")
+                parsed_dt = datetime.fromisoformat(raw_date)
+                date_formatted = parsed_dt.strftime("%d.%m.%Y %H:%M")
             except Exception:
                 date_formatted = raw_date
         else:
+            parsed_dt = receipt.created_at
             date_formatted = receipt.created_at.strftime("%d.%m.%Y %H:%M")
 
         # Сохраняем наименования товаров, адрес и полный API ответ
@@ -439,6 +441,7 @@ async def verify_receipt_with_api(session: AsyncSession, receipt_id: int) -> dic
             "pharmacy": receipt.pharmacy,
             "address": receipt.address,
             "date": date_formatted,
+            "purchase_dt": parsed_dt.isoformat() if parsed_dt else None,
             "aisida_items": aisida_items,
         }
 
@@ -558,7 +561,12 @@ async def check_pending_receipts(session: AsyncSession) -> dict:
         return {"success": False, "error": f"Ошибка при проверке: {str(e)}"}
 
 
-async def get_receipt_statistics(session: AsyncSession, user_id: int = None) -> dict:
+from typing import Optional
+
+
+async def get_receipt_statistics(
+    session: AsyncSession, user_id: Optional[int] = None
+) -> dict:
     """
     Получает статистику по чекам
 

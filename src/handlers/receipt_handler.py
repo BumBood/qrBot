@@ -1,5 +1,6 @@
 import os
 import re
+from datetime import datetime
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery, FSInputFile
 from aiogram.filters import Command
@@ -22,37 +23,7 @@ from handlers.base_handler import get_main_menu_keyboard
 # Создаем роутер для работы с чеками
 router = Router()
 
-# Список разрешенных аптек для участия в акции
-ALLOWED_PHARMACY_SUBSTRINGS = [
-    "торро",
-    "грант",
-    "авиценна",
-    "чип",
-    "парк",
-    "лекси",
-    "планета здоровья холдинг",
-    "нпо рэйл",
-    "парацельс",
-    "аджента",
-    "альфа",
-    "восток",
-    "парус",
-    "здравник",
-    "лето",
-    "радуга-16",
-    "кант",
-    "космос",
-    "азон",
-    "реон",
-    "дион",
-    "здоровье",
-    "арктик",
-    "олимп",
-    "нытва-фарм",
-    "рецепты здоровья",
-    "спот",
-    "велс",
-]
+# Убрана проверка аптек: оставляем только наличие товаров «Айсида» и проверку даты
 
 
 # Состояния для FSM
@@ -100,15 +71,19 @@ async def callback_register_receipt(callback: CallbackQuery, state: FSMContext):
     """
     Обрабатывает нажатие на кнопку "Зарегистрировать покупку"
     """
-    
-    text = ("Отлично! Чтобы подтвердить покупку, отправьте фото чека «Планета Здоровья» с QR-кодом,\n"
-        "или введите данные чека вручную (ФН, ФД, ФПД и сумма).")
-    
+
+    text = (
+        "Отлично! Чтобы подтвердить покупку, отправьте фото чека «Планета Здоровья» с QR-кодом,\n"
+        "или введите данные чека вручную (ФН, ФД, ФПД и сумма)."
+    )
+
     if callback.message.photo:
         await callback.message.answer(text, reply_markup=get_receipt_method_keyboard())
         await callback.message.delete()
     else:
-        await callback.message.edit_text(text, reply_markup=get_receipt_method_keyboard())
+        await callback.message.edit_text(
+            text, reply_markup=get_receipt_method_keyboard()
+        )
     await callback.answer()
 
 
@@ -217,20 +192,32 @@ async def process_photo(message: Message, state: FSMContext, session: AsyncSessi
         pharmacy = verify_result.get("pharmacy", "Аптека неизвестна")
         address = verify_result.get("address", "Адрес неизвестен")
         date = verify_result.get("date", "Дата неизвестна")
+        purchase_dt_iso = verify_result.get("purchase_dt")
         aisida_count = verify_result.get("aisida_count", 0)
         aisida_items = verify_result.get("aisida_items", [])  # список строк
         items_str = ", ".join(aisida_items) if aisida_items else "-"
 
-        # Проверяем требования акции: наличие продукции Айсида и разрешённой аптеки
-        if not (
-            aisida_count > 0
-            and any(
-                sub in (pharmacy or "").lower() for sub in ALLOWED_PHARMACY_SUBSTRINGS
+        # Проверяем требования акции: наличие продукции «Айсида» и дата не ранее 11 августа того же года
+        is_aisida_ok = aisida_count > 0
+        is_date_ok = False
+        try:
+            # Используем ISO-дату из API, если доступна, иначе парсим человекочитаемую
+            iso_dt = verify_result.get("purchase_dt")
+            purchase_dt = (
+                datetime.fromisoformat(iso_dt)
+                if iso_dt
+                else (datetime.strptime(date, "%d.%m.%Y %H:%M") if date else None)
             )
-        ):
+            baseline_dt = datetime(purchase_dt.year, 8, 11) if purchase_dt else None
+            is_date_ok = (
+                purchase_dt >= baseline_dt if purchase_dt and baseline_dt else False
+            )
+        except Exception:
+            is_date_ok = False
+        if not (is_aisida_ok and is_date_ok):
             await wait_msg.edit_text(
-                "К сожалению, ваша покупка не соответствует требованиям акции. Проверьте, что вы загрузили верный чек.\n"
-                "В розыгрыше приза могут участвовать только чеки, полученные в сети аптек «Планета здоровья» в которых есть продукция бренда «Айсида».",
+                "К сожалению, ваша покупка не соответствует требованиям акции.\n"
+                "Необходимо: наличие товаров «Айсида» в чеке и дата покупки не ранее 11 августа текущего года.",
                 reply_markup=get_main_menu_keyboard(),
             )
             await state.clear()
@@ -395,17 +382,28 @@ async def process_manual_entry(
         items_str = ", ".join(aisida_items) if aisida_items else "-"
         address = verify_result.get("address", "Адрес неизвестен")
         date = verify_result.get("date", "Дата неизвестна")
+        purchase_dt_iso = verify_result.get("purchase_dt")
 
-        # Проверяем требования акции: наличие продукции Айсида и разрешённой аптеки
-        if not (
-            aisida_count > 0
-            and any(
-                sub in (pharmacy or "").lower() for sub in ALLOWED_PHARMACY_SUBSTRINGS
+        # Проверяем требования акции: наличие продукции «Айсида» и дата не ранее 11 августа того же года
+        is_aisida_ok = aisida_count > 0
+        is_date_ok = False
+        try:
+            iso_dt = verify_result.get("purchase_dt")
+            purchase_dt = (
+                datetime.fromisoformat(iso_dt)
+                if iso_dt
+                else (datetime.strptime(date, "%d.%m.%Y %H:%M") if date else None)
             )
-        ):
+            baseline_dt = datetime(purchase_dt.year, 8, 11) if purchase_dt else None
+            is_date_ok = (
+                purchase_dt >= baseline_dt if purchase_dt and baseline_dt else False
+            )
+        except Exception:
+            is_date_ok = False
+        if not (is_aisida_ok and is_date_ok):
             await wait_msg.edit_text(
-                "К сожалению, ваша покупка не соответствует требованиям акции. Проверьте, что вы загрузили верный чек.\n"
-                "В розыгрыше приза могут участвовать только чеки, полученные в сети аптек «Планета здоровья» в которых есть продукция бренда «Айсида».",
+                "К сожалению, ваша покупка не соответствует требованиям акции.\n"
+                "Необходимо: наличие товаров «Айсида» в чеке и дата покупки не ранее 11 августа текущего года.",
                 reply_markup=get_main_menu_keyboard(),
             )
             await state.clear()

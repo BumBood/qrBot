@@ -6,6 +6,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from services.weekly_lottery_service import weekly_lottery_service
+from services.google_sheets_service import google_sheets_service
 from database import async_session
 from logger import logger
 from sqlalchemy import select, and_
@@ -49,6 +50,26 @@ class LotteryScheduler:
             logger.error(
                 f"Критическая ошибка в задаче еженедельного розыгрыша: {str(e)}"
             )
+
+    async def export_users_to_sheets_job(self):
+        """Задача выгрузки пользователей в Google Sheets"""
+        try:
+            logger.info("Запуск задачи экспорта пользователей в Google Sheets")
+            # Запускаем синхронную выгрузку в пуле
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(
+                None, google_sheets_service.export_users
+            )
+            if result.get("success"):
+                logger.info(
+                    f"Экспорт пользователей завершён, выгружено: {result.get('count')}"
+                )
+            else:
+                logger.error(
+                    f"Экспорт пользователей не выполнен: {result.get('error')}"
+                )
+        except Exception as e:
+            logger.error(f"Критическая ошибка экспорта в Google Sheets: {str(e)}")
 
     async def send_contact_reminders_job(self):
         """Задача для напоминания пользователям о предоставлении контактных данных победителям"""
@@ -121,6 +142,16 @@ class LotteryScheduler:
                 trigger=CronTrigger(day_of_week=1, hour=11, minute=0),  # 1 = вторник
                 id="contact_reminder",
                 name="Напоминание победителям о предоставлении контактных данных",
+                replace_existing=True,
+                max_instances=1,
+            )
+
+            # Экспорт пользователей каждые 15 минут
+            self.scheduler.add_job(
+                self.export_users_to_sheets_job,
+                trigger=CronTrigger(minute="*/15"),
+                id="export_users_to_sheets",
+                name="Экспорт пользователей в Google Sheets (каждые 15 минут)",
                 replace_existing=True,
                 max_instances=1,
             )

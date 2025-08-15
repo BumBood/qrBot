@@ -1,0 +1,198 @@
+{% extends "base.html" %}
+{% block content %}
+<h1 class="mb-4">Интеграция с Google Sheets</h1>
+
+{% if request.query_params.get('message') %}
+<div class="alert alert-info">{{ request.query_params.get('message') }}</div>
+{% endif %}
+
+<div class="card">
+  <div class="card-body">
+    <form method="post" action="/admin/google_sheets">
+      <div class="mb-3">
+        <label for="spreadsheet_id" class="form-label">Spreadsheet ID</label>
+        <input type="text" id="spreadsheet_id" name="spreadsheet_id" class="form-control" placeholder="1abc..." value="{{ spreadsheet_id or '' }}" required>
+        <div class="form-text">ID таблицы из URL. Пример: https://docs.google.com/spreadsheets/d/<b>ID</b>/edit</div>
+      </div>
+
+      <div class="mb-3">
+        <label for="credentials_json" class="form-label">Service Account Credentials (JSON)</label>
+        <textarea id="credentials_json" name="credentials_json" class="form-control" rows="8" placeholder='{"type": "service_account", ... }' required>{{ credentials_json or '' }}</textarea>
+        <div class="form-text">Вставьте содержимое JSON ключа сервисного аккаунта. Дайте доступ этой почте к таблице (Share).</div>
+      </div>
+
+      <button class="btn btn-primary" type="submit">Сохранить настройки</button>
+      <a href="/admin/google_sheets/test" class="btn btn-outline-secondary ms-2">Проверить подключение</a>
+      <a href="/admin/google_sheets/export_now" class="btn btn-success ms-2">Выгрузить пользователей сейчас</a>
+    </form>
+  </div>
+  <div class="card-footer">
+    <small class="text-muted">Лист для выгрузки: "Пользователи". Экспорт идёт каждые 15 минут.</small>
+  </div>
+</div>
+
+<div class="accordion mt-4" id="gsHelp">
+  <div class="accordion-item">
+    <h2 class="accordion-header" id="headingWhat">
+      <button class="accordion-button" type="button" data-bs-toggle="collapse" data-bs-target="#collapseWhat" aria-expanded="true" aria-controls="collapseWhat">
+        Что делает интеграция
+      </button>
+    </h2>
+    <div id="collapseWhat" class="accordion-collapse collapse show" aria-labelledby="headingWhat" data-bs-parent="#gsHelp">
+      <div class="accordion-body">
+        <ul>
+          <li>Каждые 15 минут выгружает список пользователей в Google-таблицу.</li>
+          <li>Данные записываются в лист <b>«Пользователи»</b>. Если листа нет — он создаётся.</li>
+          <li>Лист перезаписывается полностью: сначала заголовки, затем все строки с данными.</li>
+          <li>Поля: <code>telegram_id</code>, <code>username</code>, <code>full_name</code>, <code>utm_source</code>, <code>utm_medium</code>, <code>utm_campaign</code>, <code>registered_at</code>.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <div class="accordion-item">
+    <h2 class="accordion-header" id="headingPrep">
+      <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapsePrep" aria-expanded="false" aria-controls="collapsePrep">
+        Подготовка в Google Cloud (один раз)
+      </button>
+    </h2>
+    <div id="collapsePrep" class="accordion-collapse collapse" aria-labelledby="headingPrep" data-bs-parent="#gsHelp">
+      <div class="accordion-body">
+        <ol class="mb-0">
+          <li>Создайте проект в Google Cloud Console.</li>
+          <li>Включите API: <b>Google Sheets API</b> и <b>Google Drive API</b>.</li>
+          <li>Создайте <b>Service Account</b> (сервисный аккаунт) и сгенерируйте <b>JSON ключ</b> (Create key → JSON). Скачайте файл.</li>
+          <li>Запомните e-mail сервисного аккаунта (заканчивается на <code>iam.gserviceaccount.com</code>).</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+
+  <div class="accordion-item">
+    <h2 class="accordion-header" id="headingSheet">
+      <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapseSheet" aria-expanded="false" aria-controls="collapseSheet">
+        Подготовка Google-таблицы
+      </button>
+    </h2>
+    <div id="collapseSheet" class="accordion-collapse collapse" aria-labelledby="headingSheet" data-bs-parent="#gsHelp">
+      <div class="accordion-body">
+        <ol>
+          <li>Создайте пустую таблицу на Google Drive.</li>
+          <li>Скопируйте <b>Spreadsheet ID</b> из URL: <code>https://docs.google.com/spreadsheets/d/ID/edit</code>.</li>
+          <li>Нажмите <b>Share</b> и дайте доступ <b>Editor</b> e‑mail сервисного аккаунта.</li>
+        </ol>
+        <div class="alert alert-warning mb-0">Без расшаривания на сервисный аккаунт запись в таблицу невозможна (ошибка 403).</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="accordion-item">
+    <h2 class="accordion-header" id="headingSetup">
+      <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapseSetup" aria-expanded="false" aria-controls="collapseSetup">
+        Настройка в админ‑панели
+      </button>
+    </h2>
+    <div id="collapseSetup" class="accordion-collapse collapse" aria-labelledby="headingSetup" data-bs-parent="#gsHelp">
+      <div class="accordion-body">
+        <ol>
+          <li>Вставьте <b>Spreadsheet ID</b> в поле выше.</li>
+          <li>Откройте скачанный JSON‑файл сервисного аккаунта в любом редакторе и <b>целиком</b> вставьте содержимое в поле <b>Service Account Credentials (JSON)</b>.</li>
+          <li>Нажмите <b>Сохранить настройки</b>.</li>
+          <li>Нажмите <b>Проверить подключение</b>. При успешной проверке появится сообщение.</li>
+          <li>Нажмите <b>Выгрузить пользователей сейчас</b>, чтобы сделать разовую выгрузку и убедиться, что лист «Пользователи» заполнился.</li>
+        </ol>
+        <details class="mt-2">
+          <summary>Пример структуры JSON ключа</summary>
+<pre class="mt-2 mb-0"><code>{
+  "type": "service_account",
+  "project_id": "...",
+  "private_key_id": "...",
+  "private_key": "-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n",
+  "client_email": "...@...iam.gserviceaccount.com",
+  "client_id": "...",
+  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+  "token_uri": "https://oauth2.googleapis.com/token",
+  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+  "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/..."
+}</code></pre>
+        </details>
+      </div>
+    </div>
+  </div>
+
+  <div class="accordion-item">
+    <h2 class="accordion-header" id="headingFields">
+      <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapseFields" aria-expanded="false" aria-controls="collapseFields">
+        Какие данные выгружаются
+      </button>
+    </h2>
+    <div id="collapseFields" class="accordion-collapse collapse" aria-labelledby="headingFields" data-bs-parent="#gsHelp">
+      <div class="accordion-body">
+        <ul class="mb-0">
+          <li><b>telegram_id</b> — ID пользователя в Telegram.</li>
+          <li><b>username</b> — username (может быть пустым).</li>
+          <li><b>full_name</b> — имя пользователя.</li>
+          <li><b>utm_source / utm_medium / utm_campaign</b> — UTM‑метки (если были).</li>
+          <li><b>registered_at</b> — дата регистрации в формате YYYY‑MM‑DD HH:MM:SS.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <div class="accordion-item">
+    <h2 class="accordion-header" id="headingTrouble">
+      <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapseTrouble" aria-expanded="false" aria-controls="collapseTrouble">
+        Частые ошибки и их решение
+      </button>
+    </h2>
+    <div id="collapseTrouble" class="accordion-collapse collapse" aria-labelledby="headingTrouble" data-bs-parent="#gsHelp">
+      <div class="accordion-body">
+        <ul>
+          <li><b>403 Forbidden</b>: нет прав записи — проверьте, что таблица расшарена на e‑mail сервисного аккаунта с уровнем <b>Editor</b>.</li>
+          <li><b>404 Not Found</b>: неверный <b>Spreadsheet ID</b> — скопируйте его из URL таблицы.</li>
+          <li><b>Invalid JSON</b>: неправильно вставлен JSON — убедитесь, что вставляете <b>всё</b> содержимое файла, включая кавычки и переносы.</li>
+          <li><b>Перезапись листа</b>: выгрузка очищает лист «Пользователи». Если нужно вести историю — выгружайте в отдельный лист/книгу.</li>
+          <li><b>Ограничение квот</b>: при редких массовых ошибках подождите 1–5 минут — это может быть rate limit Google.</li>
+        </ul>
+        <div class="mb-0">Подробности смотрите в логах приложения: <code>logs/bot.log</code>.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="accordion-item">
+    <h2 class="accordion-header" id="headingSecurity">
+      <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapseSecurity" aria-expanded="false" aria-controls="collapseSecurity">
+        Безопасность и хранение ключей
+      </button>
+    </h2>
+    <div id="collapseSecurity" class="accordion-collapse collapse" aria-labelledby="headingSecurity" data-bs-parent="#gsHelp">
+      <div class="accordion-body">
+        <ul class="mb-0">
+          <li>Введённый JSON и ID таблицы сохраняются в файле <code>data/google_sheets_config.json</code> на сервере.</li>
+          <li>Не добавляйте этот файл в систему контроля версий (Git).</li>
+          <li>Доступ к таблице ограничен учётными данными сервисного аккаунта, храните JSON в секрете.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <div class="accordion-item">
+    <h2 class="accordion-header" id="headingDisable">
+      <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapseDisable" aria-expanded="false" aria-controls="collapseDisable">
+        Как отключить авто‑выгрузку
+      </button>
+    </h2>
+    <div id="collapseDisable" class="accordion-collapse collapse" aria-labelledby="headingDisable" data-bs-parent="#gsHelp">
+      <div class="accordion-body">
+        <ul class="mb-0">
+          <li>Очистите поля настроек (удалите <b>Spreadsheet ID</b> и JSON) и сохраните — экспорт будет отключён.</li>
+          <li>Либо временно ограничьте доступ сервисному аккаунту к таблице (Share → Remove), тогда экспорт будет пропускаться с ошибкой 403.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+

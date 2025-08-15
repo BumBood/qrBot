@@ -10,6 +10,11 @@ from models.receipt_model import Receipt
 from models.user_model import User
 from models.promocode_model import Promocode
 from models.promo_setting_model import PromoSetting
+from config import (
+    load_google_sheets_settings,
+    save_google_sheets_settings,
+)
+from services.google_sheets_service import google_sheets_service
 from services.lottery_service import select_winner, notify_winner, notify_participants
 from services.weekly_lottery_service import WeeklyLotteryService
 from services.promocode_service import promocode_service
@@ -499,7 +504,7 @@ async def confirm_weekly_lottery(
             # Не отправляем победителю повторно
             if lottery.winner_user_id and user.id == lottery.winner_user_id:
                 continue
-            
+
             try:
                 await bot.send_photo(
                     user.id,
@@ -602,3 +607,74 @@ async def update_settings(
     await session.commit()
     message = "Настройки промокода успешно обновлены"
     return RedirectResponse(url=f"/admin/settings?message={message}", status_code=303)
+
+
+@app.get("/admin/google_sheets", response_class=HTMLResponse)
+async def google_sheets_settings(
+    request: Request,
+    current_admin: AdminUser = Depends(get_current_admin),
+):
+    creds_dict, sheet_id = load_google_sheets_settings()
+    creds_text = ""
+    if creds_dict:
+        import json
+
+        creds_text = json.dumps(creds_dict, ensure_ascii=False)
+    return templates.TemplateResponse(
+        "google_sheets.html",
+        {
+            "request": request,
+            "credentials_json": creds_text,
+            "spreadsheet_id": sheet_id or "",
+        },
+    )
+
+
+@app.post("/admin/google_sheets")
+async def save_google_sheets(
+    request: Request,
+    spreadsheet_id: str = Form(...),
+    credentials_json: str = Form(...),
+    current_admin: AdminUser = Depends(get_current_admin),
+):
+    try:
+        save_google_sheets_settings(credentials_json, spreadsheet_id)
+        message = "Настройки Google Sheets сохранены"
+    except Exception as e:
+        message = f"Ошибка сохранения настроек: {str(e)}"
+    return RedirectResponse(
+        url=f"/admin/google_sheets?message={message}", status_code=303
+    )
+
+
+@app.get("/admin/google_sheets/test")
+async def test_google_sheets(
+    current_admin: AdminUser = Depends(get_current_admin),
+):
+    try:
+        client = google_sheets_service.get_client()
+        if client is None:
+            msg = "Клиент Google Sheets не инициализирован"
+        else:
+            msg = "Подключение к Google Sheets успешно"
+    except Exception as e:
+        msg = f"Ошибка подключения: {str(e)}"
+    return RedirectResponse(url=f"/admin/google_sheets?message={msg}", status_code=303)
+
+
+@app.get("/admin/google_sheets/export_now")
+async def export_now(
+    current_admin: AdminUser = Depends(get_current_admin),
+):
+    try:
+        import asyncio
+
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(None, google_sheets_service.export_users)
+        if result.get("success"):
+            msg = f"Выгружено пользователей: {result.get('count')}"
+        else:
+            msg = f"Ошибка выгрузки: {result.get('error')}"
+    except Exception as e:
+        msg = f"Ошибка выгрузки: {str(e)}"
+    return RedirectResponse(url=f"/admin/google_sheets?message={msg}", status_code=303)

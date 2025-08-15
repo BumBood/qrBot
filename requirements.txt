@@ -15,3 +15,5 @@ aiofiles
 python-multipart
 passlib[bcrypt]
 itsdangerous
+gspread
+google-auth

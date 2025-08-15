@@ -9,6 +9,7 @@ from .lottery_service import select_winner, notify_winner, notify_participants
 from .weekly_lottery_service import weekly_lottery_service
 from .scheduler_service import lottery_scheduler
 from .check_api_service import verify_check
+from .google_sheets_service import google_sheets_service
 
 __all__ = [
     "verify_receipt",
@@ -22,4 +23,5 @@ __all__ = [
     "weekly_lottery_service",
     "lottery_scheduler",
     "verify_check",
+    "google_sheets_service",
 ]

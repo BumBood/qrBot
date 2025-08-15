@@ -667,10 +667,7 @@ async def export_now(
     current_admin: AdminUser = Depends(get_current_admin),
 ):
     try:
-        import asyncio
-
-        loop = asyncio.get_event_loop()
-        result = await loop.run_in_executor(None, google_sheets_service.export_users)
+        result = await google_sheets_service.export_users()
         if result.get("success"):
             msg = f"Выгружено пользователей: {result.get('count')}"
         else:

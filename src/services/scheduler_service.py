@@ -55,11 +55,8 @@ class LotteryScheduler:
         """Задача выгрузки пользователей в Google Sheets"""
         try:
             logger.info("Запуск задачи экспорта пользователей в Google Sheets")
-            # Запускаем синхронную выгрузку в пуле
-            loop = asyncio.get_event_loop()
-            result = await loop.run_in_executor(
-                None, google_sheets_service.export_users
-            )
+            # Выполняем асинхронный экспорт (внутри он отправит блокирующие вызовы в executor)
+            result = await google_sheets_service.export_users()
             if result.get("success"):
                 logger.info(
                     f"Экспорт пользователей завершён, выгружено: {result.get('count')}"

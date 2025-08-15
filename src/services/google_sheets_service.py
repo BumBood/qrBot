@@ -42,87 +42,90 @@ class GoogleSheetsService:
             self._client = self._build_client()
         return self._client
 
-    def export_users(self) -> dict:
+    async def export_users(self) -> dict:
         try:
-            _, spreadsheet_id = load_google_sheets_settings()
-            if not spreadsheet_id:
-                return {"success": False, "error": "Не задан Spreadsheet ID"}
-
-            client = self.get_client()
-            if client is None:
-                return {"success": False, "error": "Клиент Google Sheets недоступен"}
-
-            sh = client.open_by_key(spreadsheet_id)
-            try:
-                ws = sh.worksheet("Пользователи")
-            except gspread.WorksheetNotFound:
-                ws = sh.add_worksheet(title="Пользователи", rows=1000, cols=10)
-
-            # Заголовки
-            headers = [
-                "telegram_id",
-                "username",
-                "full_name",
-                "utm_source",
-                "utm_medium",
-                "utm_campaign",
-                "registered_at",
-            ]
-
-            # Получаем пользователей из БД
+            # Сначала читаем данные из БД в текущем event loop
             users_data: List[List[str]] = []
+            async with async_session() as session:
+                res = await session.execute(select(User))
+                users: List[User] = res.scalars().all()
+                for u in users:
+                    users_data.append(
+                        [
+                            str(u.id or ""),
+                            (
+                                str(u.username)
+                                if getattr(u, "username", None) is not None
+                                else ""
+                            ),
+                            (
+                                str(u.full_name)
+                                if getattr(u, "full_name", None) is not None
+                                else ""
+                            ),
+                            (
+                                str(u.utm_source)
+                                if getattr(u, "utm_source", None) is not None
+                                else ""
+                            ),
+                            (
+                                str(u.utm_medium)
+                                if getattr(u, "utm_medium", None) is not None
+                                else ""
+                            ),
+                            (
+                                str(u.utm_campaign)
+                                if getattr(u, "utm_campaign", None) is not None
+                                else ""
+                            ),
+                            (
+                                u.registered_at.strftime("%Y-%m-%d %H:%M:%S")
+                                if u.registered_at
+                                else ""
+                            ),
+                        ]
+                    )
 
-            # читаем синхронно из асинхронной БД через run
-            async def _fetch():
-                async with async_session() as session:
-                    res = await session.execute(select(User))
-                    return res.scalars().all()
+            # Затем выполняем блокирующие операции gspread в отдельном потоке
+            loop = asyncio.get_running_loop()
 
-            users: List[User] = asyncio.run(_fetch())
-            for u in users:
-                users_data.append(
-                    [
-                        str(u.id or ""),
-                        (
-                            str(u.username)
-                            if getattr(u, "username", None) is not None
-                            else ""
-                        ),
-                        (
-                            str(u.full_name)
-                            if getattr(u, "full_name", None) is not None
-                            else ""
-                        ),
-                        (
-                            str(u.utm_source)
-                            if getattr(u, "utm_source", None) is not None
-                            else ""
-                        ),
-                        (
-                            str(u.utm_medium)
-                            if getattr(u, "utm_medium", None) is not None
-                            else ""
-                        ),
-                        (
-                            str(u.utm_campaign)
-                            if getattr(u, "utm_campaign", None) is not None
-                            else ""
-                        ),
-                        (
-                            u.registered_at.strftime("%Y-%m-%d %H:%M:%S")
-                            if u.registered_at
-                            else ""
-                        ),
-                    ]
-                )
+            def _export_sync(data: List[List[str]]) -> dict:
+                _, spreadsheet_id = load_google_sheets_settings()
+                if not spreadsheet_id:
+                    return {"success": False, "error": "Не задан Spreadsheet ID"}
 
-            # Перезаписываем лист: очищаем и пишем заново
-            ws.clear()
-            ws.update("A1", [headers])
-            if users_data:
-                ws.update(f"A2", users_data)
+                client = self._build_client()
+                if client is None:
+                    return {
+                        "success": False,
+                        "error": "Клиент Google Sheets недоступен",
+                    }
 
-            return {"success": True, "count": len(users_data)}
+                sh = client.open_by_key(spreadsheet_id)
+                try:
+                    ws = sh.worksheet("Пользователи")
+                except gspread.WorksheetNotFound:
+                    ws = sh.add_worksheet(title="Пользователи", rows=1000, cols=10)
+
+                headers = [
+                    "telegram_id",
+                    "username",
+                    "full_name",
+                    "utm_source",
+                    "utm_medium",
+                    "utm_campaign",
+                    "registered_at",
+                ]
+
+                ws.clear()
+                ws.update("A1", [headers])
+                if data:
+                    ws.update("A2", data)
+
+                return {"success": True, "count": len(data)}
+
+            result = await loop.run_in_executor(None, _export_sync, users_data)
+            return result
         except Exception as e:
             logger.error(f"Ошибка экспорта пользователей в Google Sheets: {e}")
             return {"success": False, "error": str(e)}

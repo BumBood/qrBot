@@ -1,5 +1,5 @@
 import random
-from sqlalchemy import select, func
+from sqlalchemy import select, func, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.receipt_model import Receipt
@@ -18,9 +18,14 @@ async def select_winner(session: AsyncSession) -> int:
         int: ID пользователя-победителя или None, если нет подходящих чеков
     """
     try:
-        # Получаем все подтвержденные чеки
+        # Получаем все подтвержденные чеки с хотя бы 1 позицией Айсида
         verified_receipts = await session.execute(
-            select(Receipt).where(Receipt.status == "verified")
+            select(Receipt).where(
+                and_(
+                    Receipt.status == "verified",
+                    Receipt.items_count > 0,
+                )
+            )
         )
 
         receipts_list = verified_receipts.scalars().all()

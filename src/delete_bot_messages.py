@@ -145,6 +145,73 @@ class MessageDeleter:
             await asyncio.sleep(0.1)
         return deleted
 
+    async def get_chat_info_and_display(self, chat_id: int) -> bool:
+        """
+        Получает и отображает информацию о чате
+
+        Args:
+            chat_id: ID чата
+
+        Returns:
+            bool: True если чат доступен, False если недоступен
+        """
+        try:
+            # Получаем подробную информацию о чате
+            chat_info = await self.bot.get_chat(chat_id)
+
+            print(f"\n📋 ИНФОРМАЦИЯ О ЧАТЕ:")
+            print(f"🆔 ID чата: {chat_id}")
+            print(f"📱 Тип чата: {chat_info.type}")
+
+            if hasattr(chat_info, "first_name") and chat_info.first_name:
+                print(f"👤 Имя: {chat_info.first_name}")
+            if hasattr(chat_info, "last_name") and chat_info.last_name:
+                print(f"👤 Фамилия: {chat_info.last_name}")
+            if hasattr(chat_info, "username") and chat_info.username:
+                print(f"👤 Username: @{chat_info.username}")
+            if hasattr(chat_info, "bio") and chat_info.bio:
+                print(f"📝 Био: {chat_info.bio}")
+
+            # Пытаемся получить количество участников (только для групп/каналов)
+            if chat_info.type in ["group", "supergroup", "channel"]:
+                try:
+                    member_count = await self.bot.get_chat_member_count(chat_id)
+                    print(f"👥 Участников в чате: {member_count:,}")
+                except Exception as e:
+                    logger.debug(f"Не удалось получить количество участников: {e}")
+            else:
+                print(
+                    "💬 Приватный чат (точное количество сообщений недоступно через Bot API)"
+                )
+
+            # Дополнительная информация если доступна
+            if hasattr(chat_info, "description") and chat_info.description:
+                print(
+                    f"📄 Описание: {chat_info.description[:100]}{'...' if len(chat_info.description) > 100 else ''}"
+                )
+
+            print("-" * 50)
+            return True
+
+        except (TelegramForbiddenError, TelegramBadRequest) as e:
+            error_text = str(e).lower()
+            if "chat not found" in error_text:
+                print(f"💬 Чат {chat_id} не найден (удален или бот исключен)")
+                self.chat_not_found_count += 1
+            elif "forbidden" in error_text:
+                print(f"🚫 Бот заблокирован пользователем {chat_id}")
+            else:
+                print(f"❌ Ошибка доступа к чату {chat_id}: {e}")
+
+            if chat_id not in self.blocked_users:
+                self.blocked_users.append(chat_id)
+            return False
+
+        except Exception as e:
+            print(f"❌ Ошибка при получении информации о чате {chat_id}: {e}")
+            logger.error(f"Ошибка get_chat для {chat_id}: {e}")
+            return False
+
     async def delete_all_messages_for_user(
         self, chat_id: int, start_message_id: int = 1, end_message_id: int = 50000
     ) -> int:
@@ -162,10 +229,18 @@ class MessageDeleter:
         logger.info(f"🎯 Удаление всех сообщений у пользователя {chat_id}")
         logger.info(f"📍 Диапазон message_id: {start_message_id}-{end_message_id}")
 
-        # Быстрая проверка доступности чата
-        if not await self.check_chat_availability(chat_id):
+        # Получаем и отображаем информацию о чате
+        print(f"📊 Получение информации о чате {chat_id}...")
+        if not await self.get_chat_info_and_display(chat_id):
             logger.warning(f"⏭️ Пользователь {chat_id} недоступен")
             return 0
+
+        # Показываем что будем делать
+        total_range = end_message_id - start_message_id + 1
+        print(f"🎯 Будет проверено сообщений: {total_range:,}")
+        print(f"📍 Диапазон ID сообщений: {start_message_id} - {end_message_id}")
+        print(f"⚠️ ВНИМАНИЕ: Проверяются ВСЕ сообщения в диапазоне (не только от бота)")
+        print("-" * 50)
 
         # Пробуем удалить сообщения в обратном порядке
         try:
@@ -198,11 +273,42 @@ class MessageDeleter:
             logger.warning(
                 f"⏹️ Операция прервана пользователем. Обработано: {attempts}, удалено: {deleted}"
             )
+
+            # Показываем статистику даже при прерывании
+            total_range = end_message_id - start_message_id + 1
+            progress_percent = (attempts / total_range) * 100 if total_range > 0 else 0
+
+            print("\n" + "=" * 50)
+            print("⏹️ ОПЕРАЦИЯ ПРЕРВАНА ПОЛЬЗОВАТЕЛЕМ")
+            print("📊 СТАТИСТИКА НА МОМЕНТ ПРЕРЫВАНИЯ:")
+            print(f"✅ Удалено сообщений от бота: {deleted}")
+            print(f"📈 Всего проверено message_id: {attempts:,}")
+            print(f"📊 Прогресс проверки: {progress_percent:.1f}%")
+            print("=" * 50)
+
             return deleted
+
+        # Финальная статистика
+        total_range = end_message_id - start_message_id + 1
+        progress_percent = (attempts / total_range) * 100 if total_range > 0 else 0
 
         logger.info(
             f"🏁 Завершена обработка пользователя {chat_id}. Удалено: {deleted}, проверено: {attempts}"
         )
+
+        print("\n" + "=" * 50)
+        print("🏁 ОПЕРАЦИЯ ЗАВЕРШЕНА УСПЕШНО!")
+        print("📊 ФИНАЛЬНАЯ СТАТИСТИКА:")
+        print(f"✅ Удалено сообщений от бота: {deleted}")
+        print(f"📈 Всего проверено message_id: {attempts:,}")
+        print(f"📊 Прогресс проверки: {progress_percent:.1f}%")
+        if deleted > 0:
+            efficiency = (deleted / attempts) * 100 if attempts > 0 else 0
+            print(
+                f"⚡ Эффективность удаления: {efficiency:.2f}% (найдено сообщений от бота)"
+            )
+        print("=" * 50)
+
         return deleted
 
     async def search_and_delete_messages_in_range(

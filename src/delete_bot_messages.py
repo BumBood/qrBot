@@ -314,22 +314,21 @@ class MessageDeleter:
     async def smart_delete_for_user(
         self,
         chat_id: int,
-        iterations: int = 100,
+        count: int = 100,
         test_message: str = "🧹 Очистка чата...",
     ) -> int:
         """
-        Умное удаление сообщений: отправляет сообщение, удаляет предыдущее и текущее
+        Умное удаление сообщений: отправляет сообщение, получает ID и удаляет последние N сообщений
 
         Args:
             chat_id: ID пользователя
-            iterations: Количество итераций удаления
+            count: Количество последних сообщений для удаления
             test_message: Текст тестового сообщения для отправки
         """
         deleted = 0
-        sent_messages = []
 
         logger.info(f"🧠 Умное удаление сообщений у пользователя {chat_id}")
-        logger.info(f"🔄 Количество итераций: {iterations}")
+        logger.info(f"🗑️ Количество сообщений для удаления: {count}")
 
         # Получаем и отображаем информацию о чате
         print(f"📊 Получение информации о чате {chat_id}...")
@@ -339,107 +338,56 @@ class MessageDeleter:
 
         print(f"🧠 Начинаем умное удаление сообщений:")
         print(f"📤 Отправляем тестовое сообщение: '{test_message}'")
-        print(f"🗑️ Удаляем предыдущее сообщение (message_id - 1)")
-        print(f"🗑️ Удаляем текущее сообщение")
-        print(f"🔄 Повторяем {iterations} раз")
+        print(f"🗑️ Удаляем последние {count} сообщений от полученного ID")
         print("-" * 50)
 
         try:
-            for i in range(iterations):
-                try:
-                    # Отправляем тестовое сообщение
-                    sent_message = await self.bot.send_message(
-                        chat_id=chat_id, text=f"{test_message} ({i+1}/{iterations})"
-                    )
-
-                    current_message_id = sent_message.message_id
-                    previous_message_id = current_message_id - 1
-
-                    logger.debug(f"📤 Отправлено сообщение {current_message_id}")
-                    sent_messages.append(current_message_id)
-
-                    # Небольшая задержка перед удалением
-                    await asyncio.sleep(0.1)
-
-                    # Удаляем предыдущее сообщение (message_id - 1)
-                    previous_deleted = await self.delete_message_safely(
-                        chat_id, previous_message_id
-                    )
-                    if previous_deleted:
-                        deleted += 1
-                        logger.debug(
-                            f"🗑️ Удалено предыдущее сообщение {previous_message_id}"
-                        )
-
-                    # Удаляем текущее отправленное сообщение
-                    current_deleted = await self.delete_message_safely(
-                        chat_id, current_message_id
-                    )
-                    if current_deleted:
-                        deleted += 1
-                        logger.debug(
-                            f"🗑️ Удалено текущее сообщение {current_message_id}"
-                        )
-
-                        # Убираем из списка отправленных, так как удалили
-                        if current_message_id in sent_messages:
-                            sent_messages.remove(current_message_id)
-
-                    # Показываем прогресс
-                    if (i + 1) % 10 == 0:
-                        logger.info(
-                            f"📈 Итерация {i+1}/{iterations}, удалено: {deleted}"
-                        )
-
-                    # Задержка между итерациями
-                    await asyncio.sleep(0.5)
-
-                except Exception as e:
-                    logger.warning(f"⚠️ Ошибка на итерации {i+1}: {e}")
-                    continue
-
-        except KeyboardInterrupt:
-            current_iteration = locals().get("i", -1) + 1
-            logger.warning(
-                f"⏹️ Умное удаление прервано пользователем на итерации {current_iteration}"
+            # Отправляем тестовое сообщение для получения актуального message_id
+            sent_message = await self.bot.send_message(
+                chat_id=chat_id, text=test_message
             )
 
-            # Пытаемся очистить оставшиеся отправленные сообщения
-            if sent_messages:
-                print(
-                    f"\n🧹 Очистка {len(sent_messages)} оставшихся тестовых сообщений..."
-                )
-                for msg_id in sent_messages:
-                    try:
-                        success = await self.delete_message_safely(chat_id, msg_id)
-                        if success:
-                            deleted += 1
-                    except Exception as e:
-                        logger.debug(f"Ошибка при очистке сообщения {msg_id}: {e}")
-                        continue
+            current_message_id = sent_message.message_id
+            logger.info(f"📤 Отправлено сообщение с ID: {current_message_id}")
+
+            # Удаляем отправленное тестовое сообщение
+            await asyncio.sleep(0.1)
+            test_deleted = await self.delete_message_safely(chat_id, current_message_id)
+            if test_deleted:
+                deleted += 1
+                logger.info(f"🗑️ Удалено тестовое сообщение {current_message_id}")
+
+            # Удаляем последние N сообщений, начиная от current_message_id - 1
+            start_id = max(1, current_message_id - count)
+            end_id = current_message_id - 1
+
+            print(f"🎯 Удаляем сообщения в диапазоне: {start_id} - {end_id}")
+            print(f"📍 Всего для проверки: {end_id - start_id + 1} сообщений")
+
+            for message_id in range(end_id, start_id - 1, -1):
+                success = await self.delete_message_safely(chat_id, message_id)
+                if success:
+                    deleted += 1
+
+                if deleted % 25 == 0 and deleted > 0:
+                    logger.info(f"📈 Удалено {deleted} сообщений...")
+
+                await asyncio.sleep(0.03)
+
+        except KeyboardInterrupt:
+            logger.warning("⏹️ Умное удаление прервано пользователем")
 
             print("\n" + "=" * 50)
             print("⏹️ УМНОЕ УДАЛЕНИЕ ПРЕРВАНО")
             print("📊 СТАТИСТИКА НА МОМЕНТ ПРЕРЫВАНИЯ:")
             print(f"✅ Удалено сообщений: {deleted}")
-            print(f"🔄 Выполнено итераций: {current_iteration}/{iterations}")
             print("=" * 50)
 
             return deleted
 
-        # Очистка оставшихся тестовых сообщений (если есть)
-        if sent_messages:
-            logger.info(
-                f"🧹 Очистка {len(sent_messages)} оставшихся тестовых сообщений..."
-            )
-            for msg_id in sent_messages:
-                try:
-                    success = await self.delete_message_safely(chat_id, msg_id)
-                    if success:
-                        deleted += 1
-                except Exception as e:
-                    logger.debug(f"Ошибка при очистке сообщения {msg_id}: {e}")
-                    continue
+        except Exception as e:
+            logger.error(f"❌ Критическая ошибка при умном удалении: {e}")
+            return deleted
 
         logger.info(
             f"🏁 Умное удаление завершено для пользователя {chat_id}. Удалено: {deleted}"
@@ -449,10 +397,9 @@ class MessageDeleter:
         print("🧠 УМНОЕ УДАЛЕНИЕ ЗАВЕРШЕНО!")
         print("📊 ФИНАЛЬНАЯ СТАТИСТИКА:")
         print(f"✅ Удалено сообщений: {deleted}")
-        print(f"🔄 Выполнено итераций: {iterations}")
-        efficiency = (deleted / (iterations * 2)) * 100 if iterations > 0 else 0
-        print(f"⚡ Эффективность: {efficiency:.1f}% (от теоретического максимума)")
-        print("💡 Примечание: удаляются как предыдущие, так и новые сообщения")
+        print(f"🎯 Проверено сообщений: {count}")
+        efficiency = (deleted / count) * 100 if count > 0 else 0
+        print(f"⚡ Эффективность: {efficiency:.1f}%")
         print("=" * 50)
 
         return deleted
@@ -770,8 +717,10 @@ async def main():
             user_id = int(user_id_str)
 
             # Настройка параметров
-            iterations_str = input("Количество итераций (по умолчанию 100): ").strip()
-            iterations = int(iterations_str) if iterations_str.isdigit() else 100
+            count_str = input(
+                "Количество сообщений для удаления (по умолчанию 100): "
+            ).strip()
+            count = int(count_str) if count_str.isdigit() else 100
 
             test_message = input(
                 "Текст тестового сообщения (или Enter для стандартного): "
@@ -782,14 +731,11 @@ async def main():
             print("\n💡 КАК РАБОТАЕТ УМНОЕ УДАЛЕНИЕ:")
             print("1. 📤 Отправляется тестовое сообщение")
             print("2. 📍 Определяется его message_id")
-            print("3. 🗑️ Удаляется предыдущее сообщение (message_id - 1)")
-            print("4. 🗑️ Удаляется текущее тестовое сообщение")
-            print("5. 🔄 Процесс повторяется N раз")
+            print("3. 🗑️ Удаляются последние N сообщений от полученного ID")
             print(f"\n📊 Параметры:")
             print(f"👤 Пользователь: {user_id}")
-            print(f"🔄 Итераций: {iterations}")
+            print(f"🗑️ Сообщений для удаления: {count}")
             print(f"💬 Тестовое сообщение: '{test_message}'")
-            print(f"⏱️ Теоретический максимум удалений: {iterations * 2}")
 
             # Подтверждение
             confirm = (
@@ -810,7 +756,7 @@ async def main():
             print("-" * 60)
 
             deleted = await deleter.smart_delete_for_user(
-                chat_id=user_id, iterations=iterations, test_message=test_message
+                chat_id=user_id, count=count, test_message=test_message
             )
 
             print(f"\n✅ Умное удаление завершено!")

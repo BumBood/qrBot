@@ -33,6 +33,7 @@ class MessageDeleter:
         self.deleted_count = 0
         self.error_count = 0
         self.blocked_users: List[int] = []
+        self.chat_not_found_count = 0
 
     async def get_all_users(self) -> List[User]:
         """Получает всех пользователей из базы данных"""
@@ -41,6 +42,30 @@ class MessageDeleter:
             users = result.scalars().all()
             logger.info(f"Найдено пользователей в БД: {len(users)}")
             return list(users)
+
+    async def check_chat_availability(self, chat_id: int) -> bool:
+        """
+        Быстро проверяет доступность чата, отправив простой запрос
+        Возвращает True если чат доступен, False если нет
+        """
+        try:
+            # Пытаемся получить информацию о чате
+            await self.bot.get_chat(chat_id)
+            return True
+        except (TelegramForbiddenError, TelegramBadRequest) as e:
+            error_text = str(e).lower()
+            if "chat not found" in error_text:
+                logger.debug(f"💬 Чат {chat_id} не найден при проверке доступности")
+                self.chat_not_found_count += 1
+            elif "forbidden" in error_text:
+                logger.debug(f"🚫 Бот заблокирован пользователем {chat_id}")
+
+            if chat_id not in self.blocked_users:
+                self.blocked_users.append(chat_id)
+            return False
+        except Exception as e:
+            logger.debug(f"⚠️ Ошибка при проверке чата {chat_id}: {e}")
+            return True  # Даем шанс попробовать удалить сообщения
 
     async def delete_message_safely(self, chat_id: int, message_id: int) -> bool:
         """Безопасно удаляет сообщение с обработкой ошибок"""
@@ -62,15 +87,28 @@ class MessageDeleter:
             return False
 
         except TelegramBadRequest as e:
-            # Различные ошибки (слишком старое сообщение, нет прав и т.д.)
-            if "message to delete not found" in str(e).lower():
+            # Различные ошибки (слишком старое сообщение, нет прав, чат не найден и т.д.)
+            error_text = str(e).lower()
+
+            if "chat not found" in error_text:
+                # Чат удален или бот исключен из чата
+                logger.warning(f"💬 Чат {chat_id} не найден (удален или бот исключен)")
+                self.chat_not_found_count += 1
+                if chat_id not in self.blocked_users:
+                    self.blocked_users.append(chat_id)
+                return False
+            elif "message to delete not found" in error_text:
                 logger.debug(
                     f"⚠️ Сообщение {message_id} в чате {chat_id} не найдено для удаления"
                 )
-            elif "message can't be deleted" in str(e).lower():
+            elif "message can't be deleted" in error_text:
                 logger.warning(
                     f"⚠️ Сообщение {message_id} в чате {chat_id} нельзя удалить (слишком старое)"
                 )
+            elif "user is deactivated" in error_text:
+                logger.warning(f"👤 Пользователь {chat_id} деактивирован")
+                if chat_id not in self.blocked_users:
+                    self.blocked_users.append(chat_id)
             else:
                 logger.error(
                     f"❌ Ошибка при удалении сообщения {message_id} в чате {chat_id}: {e}"
@@ -88,7 +126,19 @@ class MessageDeleter:
     async def delete_messages_by_ids(self, chat_id: int, message_ids: List[int]) -> int:
         """Удаляет сообщения по их ID"""
         deleted = 0
-        for message_id in message_ids:
+
+        # Проверяем доступность чата с первым сообщением
+        if message_ids:
+            first_check = await self.delete_message_safely(chat_id, message_ids[0])
+            if not first_check and chat_id in self.blocked_users:
+                # Если чат недоступен, пропускаем остальные сообщения для этого пользователя
+                logger.warning(f"⏭️ Пропускаем пользователя {chat_id} (чат недоступен)")
+                return 0
+            elif first_check:
+                deleted += 1
+
+        # Продолжаем с остальными сообщениями
+        for message_id in message_ids[1:]:
             if await self.delete_message_safely(chat_id, message_id):
                 deleted += 1
             # Небольшая задержка между запросами
@@ -123,10 +173,14 @@ class MessageDeleter:
                 )
                 break
 
-            try:
-                # Пытаемся получить информацию о сообщении через forward
-                # (это косвенный способ проверить существование сообщения)
+            # Проверяем, не заблокирован ли уже пользователь после первых попыток
+            if attempts > 0 and chat_id in self.blocked_users:
+                logger.warning(
+                    f"⏭️ Пропускаем остальные сообщения для {chat_id} (чат недоступен)"
+                )
+                break
 
+            try:
                 # Сначала пытаемся удалить сообщение
                 success = await self.delete_message_safely(chat_id, message_id)
                 if success:
@@ -182,22 +236,28 @@ class MessageDeleter:
                 f"👤 [{i}/{len(users)}] Обработка пользователя {user.id} (@{user.username})"
             )
 
+            # Быстрая проверка доступности чата
+            user_id = int(user.id)  # Явное приведение типа для избежания ошибок линтера
+            if not await self.check_chat_availability(user_id):
+                logger.info(f"⏭️ Пропускаем пользователя {user_id} (чат недоступен)")
+                continue
+
             try:
                 if message_ids:
                     # Удаляем конкретные сообщения
-                    await self.delete_messages_by_ids(user.id, message_ids)
+                    await self.delete_messages_by_ids(user_id, message_ids)
 
                 elif search_text and message_id_range:
                     # Ищем и удаляем сообщения в диапазоне
                     await self.search_and_delete_messages_in_range(
-                        user.id, search_text, message_id_range[0], message_id_range[1]
+                        user_id, search_text, message_id_range[0], message_id_range[1]
                     )
 
                 # Пауза между пользователями
                 await asyncio.sleep(1)
 
             except Exception as e:
-                logger.error(f"❌ Ошибка при обработке пользователя {user.id}: {e}")
+                logger.error(f"❌ Ошибка при обработке пользователя {user_id}: {e}")
                 continue
 
         # Выводим статистику
@@ -205,9 +265,12 @@ class MessageDeleter:
         logger.info("📊 ИТОГОВАЯ СТАТИСТИКА:")
         logger.info(f"✅ Удалено сообщений: {self.deleted_count}")
         logger.info(f"❌ Ошибок: {self.error_count}")
-        logger.info(f"🚫 Пользователей заблокировало бота: {len(self.blocked_users)}")
+        logger.info(f"🚫 Недоступных пользователей: {len(self.blocked_users)}")
+        logger.info(f"💬 Чатов не найдено: {self.chat_not_found_count}")
         if self.blocked_users:
-            logger.info(f"🚫 Заблокированные пользователи: {self.blocked_users}")
+            logger.info(
+                f"🚫 ID недоступных пользователей: {self.blocked_users[:10]}{'...' if len(self.blocked_users) > 10 else ''}"
+            )
         logger.info("=" * 50)
 
     async def close(self):

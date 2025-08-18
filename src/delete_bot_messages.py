@@ -5,7 +5,7 @@
 import asyncio
 import sys
 import os
-from typing import List, Optional
+from typing import List, Optional, Optional
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -316,19 +316,28 @@ class MessageDeleter:
         chat_id: int,
         count: int = 100,
         test_message: str = "🧹 Очистка чата...",
+        search_text: Optional[str] = None,
+        delete_limit: Optional[int] = None,
     ) -> int:
         """
         Умное удаление сообщений: отправляет сообщение, получает ID и удаляет последние N сообщений
 
         Args:
             chat_id: ID пользователя
-            count: Количество последних сообщений для удаления
+            count: Количество последних сообщений для проверки
             test_message: Текст тестового сообщения для отправки
+            search_text: Текст для поиска в сообщениях (если None - удаляет все)
+            delete_limit: Лимит количества удалений (если None - без лимита)
         """
         deleted = 0
+        checked = 0
 
         logger.info(f"🧠 Умное удаление сообщений у пользователя {chat_id}")
-        logger.info(f"🗑️ Количество сообщений для удаления: {count}")
+        logger.info(f"🔍 Количество сообщений для проверки: {count}")
+        if search_text:
+            logger.info(f"🎯 Поиск текста: '{search_text}'")
+        if delete_limit:
+            logger.info(f"📊 Лимит удалений: {delete_limit}")
 
         # Получаем и отображаем информацию о чате
         print(f"📊 Получение информации о чате {chat_id}...")
@@ -338,7 +347,13 @@ class MessageDeleter:
 
         print(f"🧠 Начинаем умное удаление сообщений:")
         print(f"📤 Отправляем тестовое сообщение: '{test_message}'")
-        print(f"🗑️ Удаляем последние {count} сообщений от полученного ID")
+        if search_text:
+            print(f"🔍 Удаляем сообщения содержащие: '{search_text}'")
+        else:
+            print(f"🗑️ Удаляем все найденные сообщения")
+        print(f"📍 Проверяем последние {count} сообщений от полученного ID")
+        if delete_limit:
+            print(f"📊 Лимит удалений: {delete_limit}")
         print("-" * 50)
 
         try:
@@ -354,25 +369,65 @@ class MessageDeleter:
             await asyncio.sleep(0.1)
             test_deleted = await self.delete_message_safely(chat_id, current_message_id)
             if test_deleted:
-                deleted += 1
                 logger.info(f"🗑️ Удалено тестовое сообщение {current_message_id}")
 
-            # Удаляем последние N сообщений, начиная от current_message_id - 1
+            # Проверяем последние N сообщений, начиная от current_message_id - 1
             start_id = max(1, current_message_id - count)
             end_id = current_message_id - 1
 
-            print(f"🎯 Удаляем сообщения в диапазоне: {start_id} - {end_id}")
+            print(f"🎯 Проверяем сообщения в диапазоне: {start_id} - {end_id}")
             print(f"📍 Всего для проверки: {end_id - start_id + 1} сообщений")
 
             for message_id in range(end_id, start_id - 1, -1):
-                success = await self.delete_message_safely(chat_id, message_id)
-                if success:
-                    deleted += 1
+                # Проверяем лимит удалений
+                if delete_limit and deleted >= delete_limit:
+                    logger.info(f"🛑 Достигнут лимит удалений: {delete_limit}")
+                    break
 
-                if deleted % 25 == 0 and deleted > 0:
-                    logger.info(f"📈 Удалено {deleted} сообщений...")
+                checked += 1
 
-                await asyncio.sleep(0.03)
+                # Если указан поиск по тексту - проверяем содержимое
+                should_delete = True
+                if search_text:
+                    should_delete = False
+                    try:
+                        # Пытаемся переслать сообщение самому себе для проверки содержимого
+                        forwarded = await self.bot.forward_message(
+                            chat_id=chat_id, from_chat_id=chat_id, message_id=message_id
+                        )
+
+                        # Удаляем пересланное сообщение сразу
+                        await self.delete_message_safely(chat_id, forwarded.message_id)
+
+                        # Проверяем текст пересланного сообщения
+                        message_text = forwarded.text or forwarded.caption or ""
+
+                        if search_text.lower() in message_text.lower():
+                            should_delete = True
+                            logger.debug(
+                                f"🔍 Найден текст в сообщении {message_id}: '{message_text[:50]}...'"
+                            )
+
+                    except Exception:
+                        # Если не удалось получить содержимое - пропускаем
+                        should_delete = False
+
+                # Удаляем сообщение если нужно
+                if should_delete:
+                    success = await self.delete_message_safely(chat_id, message_id)
+                    if success:
+                        deleted += 1
+                        if search_text:
+                            logger.debug(
+                                f"🗑️ Удалено сообщение {message_id} с искомым текстом"
+                            )
+
+                if deleted % 10 == 0 and deleted > 0:
+                    logger.info(
+                        f"📈 Удалено {deleted} сообщений, проверено {checked}..."
+                    )
+
+                await asyncio.sleep(0.04)
 
         except KeyboardInterrupt:
             logger.warning("⏹️ Умное удаление прервано пользователем")
@@ -381,6 +436,7 @@ class MessageDeleter:
             print("⏹️ УМНОЕ УДАЛЕНИЕ ПРЕРВАНО")
             print("📊 СТАТИСТИКА НА МОМЕНТ ПРЕРЫВАНИЯ:")
             print(f"✅ Удалено сообщений: {deleted}")
+            print(f"🔍 Проверено сообщений: {checked}")
             print("=" * 50)
 
             return deleted
@@ -397,8 +453,12 @@ class MessageDeleter:
         print("🧠 УМНОЕ УДАЛЕНИЕ ЗАВЕРШЕНО!")
         print("📊 ФИНАЛЬНАЯ СТАТИСТИКА:")
         print(f"✅ Удалено сообщений: {deleted}")
-        print(f"🎯 Проверено сообщений: {count}")
-        efficiency = (deleted / count) * 100 if count > 0 else 0
+        print(f"🔍 Проверено сообщений: {checked}")
+        if search_text:
+            print(f"🎯 Искали текст: '{search_text}'")
+        if delete_limit:
+            print(f"📊 Лимит удалений: {delete_limit}")
+        efficiency = (deleted / checked) * 100 if checked > 0 else 0
         print(f"⚡ Эффективность: {efficiency:.1f}%")
         print("=" * 50)
 
@@ -558,7 +618,7 @@ async def main():
         print("2. Найти и удалить сообщения с определенным текстом в диапазоне ID")
         print("3. Быстрое удаление - указать текст и примерный диапазон")
         print("4. Удалить все сообщения у конкретного пользователя (без лимита)")
-        print("5. Умное удаление: отправка + удаление предыдущего и текущего сообщения")
+        print("5. Умное удаление: поиск по тексту + лимит удалений")
 
         choice = input("Введите номер режима (1-5): ").strip()
 
@@ -718,9 +778,20 @@ async def main():
 
             # Настройка параметров
             count_str = input(
-                "Количество сообщений для удаления (по умолчанию 100): "
+                "Количество сообщений для проверки (по умолчанию 100): "
             ).strip()
             count = int(count_str) if count_str.isdigit() else 100
+
+            # Поиск по тексту
+            search_text = input(
+                "Искать только сообщения с текстом (или Enter для всех): "
+            ).strip()
+            if not search_text:
+                search_text = None
+
+            # Лимит удалений
+            limit_str = input("Лимит удалений (или Enter для без лимита): ").strip()
+            delete_limit = int(limit_str) if limit_str.isdigit() else None
 
             test_message = input(
                 "Текст тестового сообщения (или Enter для стандартного): "
@@ -731,11 +802,18 @@ async def main():
             print("\n💡 КАК РАБОТАЕТ УМНОЕ УДАЛЕНИЕ:")
             print("1. 📤 Отправляется тестовое сообщение")
             print("2. 📍 Определяется его message_id")
-            print("3. 🗑️ Удаляются последние N сообщений от полученного ID")
+            print("3. 🔍 Проверяются последние N сообщений на содержание текста")
+            print("4. 🗑️ Удаляются подходящие сообщения")
             print(f"\n📊 Параметры:")
             print(f"👤 Пользователь: {user_id}")
-            print(f"🗑️ Сообщений для удаления: {count}")
+            print(f"🔍 Сообщений для проверки: {count}")
             print(f"💬 Тестовое сообщение: '{test_message}'")
+            if search_text:
+                print(f"🎯 Поиск текста: '{search_text}'")
+            else:
+                print(f"🗑️ Удаляем все найденные сообщения")
+            if delete_limit:
+                print(f"📊 Лимит удалений: {delete_limit}")
 
             # Подтверждение
             confirm = (
@@ -756,7 +834,11 @@ async def main():
             print("-" * 60)
 
             deleted = await deleter.smart_delete_for_user(
-                chat_id=user_id, count=count, test_message=test_message
+                chat_id=user_id,
+                count=count,
+                test_message=test_message,
+                search_text=search_text,
+                delete_limit=delete_limit,
             )
 
             print(f"\n✅ Умное удаление завершено!")

@@ -1,0 +1,25 @@
+{
+    "common_search_patterns": [
+      "Победитель: чек № 27"
+    ],
+    "default_message_id_range": {
+      "start": 1,
+      "end": 1000,
+      "max_attempts": 100
+    },
+    "batch_settings": {
+      "delay_between_messages": 0.1,
+      "delay_between_users": 1.0,
+      "max_users_per_batch": 50
+    },
+    "logging": {
+      "log_level": "INFO",
+      "log_file": "message_deletion.log",
+      "detailed_errors": true
+    },
+    "safety": {
+      "require_confirmation": true,
+      "dry_run_mode": false,
+      "max_deletions_per_user": 10
+    }
+  }

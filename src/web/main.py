@@ -23,6 +23,7 @@ from passlib.context import CryptContext
 from fastapi import HTTPException, status
 from models.admin_model import AdminUser
 from pathlib import Path
+from sqlalchemy import delete as sa_delete
 
 
 app = FastAPI()
@@ -460,12 +461,24 @@ async def confirm_weekly_lottery(
     from aiogram import Bot
     from config import BOT_TOKEN
     from aiogram.types import FSInputFile
+    from sqlalchemy import update as sa_update
 
     # Определяем корень проекта для абсолютных путей
     BASE_DIR = Path(__file__).resolve().parents[2]
 
     lottery = await session.get(WeeklyLottery, lottery_id)
     if not lottery or lottery.notification_sent:
+        return RedirectResponse(url="/admin/lotteries", status_code=303)
+
+    # Защита от повторной отправки: атомарно помечаем как отправленный ДО рассылки
+    upd = await session.execute(
+        sa_update(WeeklyLottery)
+        .where(WeeklyLottery.id == lottery_id, WeeklyLottery.notification_sent == False)
+        .values(notification_sent=True)
+    )
+    await session.commit()
+    if upd.rowcount == 0:
+        # Уже был помечен кем-то другим
         return RedirectResponse(url="/admin/lotteries", status_code=303)
 
     # Отправляем уведомления победителю и участникам
@@ -513,9 +526,7 @@ async def confirm_weekly_lottery(
                 )
             except Exception as e:
                 pass
-    # Помечаем как уведомленный и запрещаем повтор
-    lottery.notification_sent = True
-    await session.commit()
+    # Уже помечено выше атомарным апдейтом
     return RedirectResponse(url="/admin/lotteries", status_code=303)
 
 
@@ -675,3 +686,18 @@ async def export_now(
     except Exception as e:
         msg = f"Ошибка выгрузки: {str(e)}"
     return RedirectResponse(url=f"/admin/google_sheets?message={msg}", status_code=303)
+
+
+@app.post("/admin/receipts/{receipt_id}/delete")
+async def delete_receipt(
+    receipt_id: int,
+    current_admin: AdminUser = Depends(get_current_admin),
+    session: AsyncSession = Depends(get_db),
+):
+    try:
+        await session.execute(sa_delete(Receipt).where(Receipt.id == receipt_id))
+        await session.commit()
+        message = f"Чек #{receipt_id} удалён"
+    except Exception as e:
+        message = f"Ошибка удаления чека #{receipt_id}: {str(e)}"
+    return RedirectResponse(url=f"/admin/receipts?message={message}", status_code=303)

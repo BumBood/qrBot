@@ -54,6 +54,9 @@
       <button name="action" value="rejected" class="btn btn-sm btn-danger">Отклонить</button>
       {% endif %}
     </form>
+    <form action="/admin/receipts/{{ r.id }}/delete" method="post" class="d-inline" onsubmit="return confirm('Удалить чек #{{ r.id }}? Это действие необратимо.');">
+      <button class="btn btn-sm btn-outline-danger">Удалить</button>
+    </form>
   </td>
 </tr>
 {% endfor %}

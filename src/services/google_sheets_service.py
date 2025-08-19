@@ -49,7 +49,22 @@ class GoogleSheetsService:
             async with async_session() as session:
                 res = await session.execute(select(User))
                 users: List[User] = res.scalars().all()
+
+                # Получаем количество чеков для каждого пользователя
+                from models.receipt_model import Receipt
+                from sqlalchemy import func
+
+                receipt_counts_result = await session.execute(
+                    select(Receipt.user_id, func.count(Receipt.id)).group_by(
+                        Receipt.user_id
+                    )
+                )
+                receipt_counts = {
+                    user_id: count for user_id, count in receipt_counts_result.all()
+                }
+
                 for u in users:
+                    receipt_count = receipt_counts.get(u.id, 0)
                     users_data.append(
                         [
                             str(u.id or ""),
@@ -83,6 +98,8 @@ class GoogleSheetsService:
                                 if u.registered_at
                                 else ""
                             ),
+                            "да" if receipt_count > 0 else "нет",
+                            str(receipt_count),
                         ]
                     )
 
@@ -105,7 +122,7 @@ class GoogleSheetsService:
                 try:
                     ws = sh.worksheet("Пользователи")
                 except gspread.WorksheetNotFound:
-                    ws = sh.add_worksheet(title="Пользователи", rows=1000, cols=10)
+                    ws = sh.add_worksheet(title="Пользователи", rows=1000, cols=12)
 
                 headers = [
                     "telegram_id",
@@ -115,6 +132,8 @@ class GoogleSheetsService:
                     "utm_medium",
                     "utm_campaign",
                     "registered_at",
+                    "has_receipts",
+                    "receipt_count",
                 ]
 
                 ws.clear()

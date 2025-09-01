@@ -49,9 +49,6 @@
     <form action="/admin/lotteries/{{ l.id }}/reroll" method="post" style="display:inline-block; margin-left:5px;">
       <button type="submit" class="btn btn-sm btn-warning">Переиграть</button>
     </form>
-    <button type="button" class="btn btn-sm btn-info" data-bs-toggle="modal" data-bs-target="#selectReceiptModal{{ l.id }}" style="margin-left:5px;">
-      Выбрать номер чека
-    </button>
     {% else %}
     Подтверждено
     {% endif %}
@@ -64,78 +61,4 @@
 </tbody>
 </table>
 </div>
-
-<!-- Модальные окна для выбора чека -->
-{% for l in lotteries %}
-{% if not l.notification_sent %}
-<div class="modal fade" id="selectReceiptModal{{ l.id }}" tabindex="-1" aria-labelledby="selectReceiptModalLabel{{ l.id }}" aria-hidden="true">
-  <div class="modal-dialog modal-lg">
-    <div class="modal-content">
-      <div class="modal-header">
-        <h5 class="modal-title" id="selectReceiptModalLabel{{ l.id }}">Выбрать чек для розыгрыша #{{ l.id }}</h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-      </div>
-      <div class="modal-body">
-        <p>Неделя: {{ l.week_start.strftime("%d.%m.%Y") }} - {{ l.week_end.strftime("%d.%m.%Y") }}</p>
-        <div id="receiptsList{{ l.id }}">
-          <p>Загрузка списка чеков...</p>
-        </div>
-      </div>
-    </div>
-  </div>
-</div>
-{% endif %}
-{% endfor %}
-
-<script>
-// Функция для загрузки списка чеков
-function loadReceipts(lotteryId, weekStart, weekEnd) {
-  fetch(`/admin/lotteries/${lotteryId}/receipts?week_start=${weekStart}&week_end=${weekEnd}`)
-    .then(response => response.json())
-    .then(data => {
-      const container = document.getElementById(`receiptsList${lotteryId}`);
-      if (data.receipts && data.receipts.length > 0) {
-        let html = '<form action="/admin/lotteries/' + lotteryId + '/set_winner" method="post">';
-        html += '<div class="table-responsive"><table class="table table-sm">';
-        html += '<thead><tr><th>Выбрать</th><th>ID чека</th><th>Пользователь</th><th>Сумма</th><th>Товаров Айсида</th><th>Дата</th></tr></thead><tbody>';
-        
-        data.receipts.forEach(receipt => {
-          html += '<tr>';
-          html += `<td><input type="radio" name="receipt_id" value="${receipt.id}" required></td>`;
-          html += `<td>${receipt.id}</td>`;
-          html += `<td>${receipt.user_id}</td>`;
-          html += `<td>${receipt.amount} ₽</td>`;
-          html += `<td>${receipt.items_count}</td>`;
-          html += `<td>${new Date(receipt.created_at).toLocaleDateString('ru-RU')}</td>`;
-          html += '</tr>';
-        });
-        
-        html += '</tbody></table></div>';
-        html += '<div class="mt-3">';
-        html += '<button type="submit" class="btn btn-primary">Установить победителя</button>';
-        html += '<button type="button" class="btn btn-secondary" data-bs-dismiss="modal" style="margin-left: 10px;">Отмена</button>';
-        html += '</div>';
-        html += '</form>';
-        
-        container.innerHTML = html;
-      } else {
-        container.innerHTML = '<p class="text-muted">Нет подходящих чеков для данной недели</p>';
-      }
-    })
-    .catch(error => {
-      console.error('Ошибка загрузки чеков:', error);
-      document.getElementById(`receiptsList${lotteryId}`).innerHTML = '<p class="text-danger">Ошибка загрузки списка чеков</p>';
-    });
-}
-
-// Обработчик открытия модального окна
-{% for l in lotteries %}
-{% if not l.notification_sent %}
-document.getElementById('selectReceiptModal{{ l.id }}').addEventListener('show.bs.modal', function() {
-  loadReceipts({{ l.id }}, '{{ l.week_start.isoformat() }}', '{{ l.week_end.isoformat() }}');
-});
-{% endif %}
-{% endfor %}
-</script>
-
 {% endblock %} 

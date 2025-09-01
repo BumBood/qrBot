@@ -1,12 +1,4 @@
-from sqlalchemy import (
-    Column,
-    Integer,
-    BigInteger,
-    String,
-    DateTime,
-    ForeignKey,
-    Boolean,
-)
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Boolean
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from database import Base
@@ -21,7 +13,7 @@ class WeeklyLottery(Base):
     week_start = Column(DateTime, nullable=False)  # Начало недели (понедельник 00:00)
     week_end = Column(DateTime, nullable=False)  # Конец недели (воскресенье 23:59)
     winner_user_id = Column(
-        BigInteger, ForeignKey("users.id"), nullable=True
+        Integer, ForeignKey("users.id"), nullable=True
     )  # ID победителя
     winner_receipt_id = Column(
         Integer, ForeignKey("receipts.id"), nullable=True

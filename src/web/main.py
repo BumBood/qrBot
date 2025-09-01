@@ -576,6 +576,59 @@ async def delete_weekly_lottery(
     return RedirectResponse(url="/admin/lotteries", status_code=303)
 
 
+@app.get("/admin/lotteries/{lottery_id}/manual_select", response_class=HTMLResponse)
+async def manual_select_form(
+    request: Request,
+    lottery_id: int,
+    current_admin: AdminUser = Depends(get_current_admin),
+    session: AsyncSession = Depends(get_db),
+):
+    """Страница ручного выбора чека для розыгрыша"""
+    from models.weekly_lottery_model import WeeklyLottery
+
+    # Получаем розыгрыш
+    lottery = await session.get(WeeklyLottery, lottery_id)
+    if not lottery:
+        return RedirectResponse(url="/admin/lotteries", status_code=303)
+
+    # Получаем подходящие чеки для недели розыгрыша
+    eligible_receipts = await WeeklyLotteryService.get_eligible_receipts(
+        session, lottery.week_start, lottery.week_end
+    )
+
+    return templates.TemplateResponse(
+        "manual_select.html",
+        {
+            "request": request,
+            "lottery": lottery,
+            "eligible_receipts": eligible_receipts,
+        },
+    )
+
+
+@app.post("/admin/lotteries/{lottery_id}/manual_select")
+async def manual_select_winner(
+    request: Request,
+    lottery_id: int,
+    receipt_id: int = Form(...),
+    current_admin: AdminUser = Depends(get_current_admin),
+    session: AsyncSession = Depends(get_db),
+):
+    """Обработка ручного выбора победителя"""
+
+    # Выполняем ручной выбор победителя
+    result = await WeeklyLotteryService.manual_select_winner(
+        session, lottery_id, receipt_id
+    )
+
+    if result["success"]:
+        message = result["message"]
+    else:
+        message = f"Ошибка: {result['error']}"
+
+    return RedirectResponse(url=f"/admin/lotteries?message={message}", status_code=303)
+
+
 @app.get("/admin/settings", response_class=HTMLResponse)
 async def settings(
     request: Request,

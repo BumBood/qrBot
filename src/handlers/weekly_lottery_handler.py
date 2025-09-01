@@ -74,17 +74,19 @@ async def callback_weekly_lottery(callback: CallbackQuery, session: AsyncSession
         builder.button(text="Назад в меню", callback_data="main_menu")
         builder.adjust(1)
 
-        await callback.message.edit_text(
-            text, reply_markup=builder.as_markup(), parse_mode="HTML"
-        )
+        if callback.message and hasattr(callback.message, "edit_text"):
+            await callback.message.edit_text(
+                text, reply_markup=builder.as_markup(), parse_mode="HTML"
+            )
         await callback.answer()
 
     except Exception as e:
         logger.error(f"Ошибка при обработке запроса еженедельного розыгрыша: {str(e)}")
-        await callback.message.edit_text(
-            "Произошла ошибка при загрузке информации о розыгрыше. Попробуйте позже.",
-            reply_markup=get_main_menu_keyboard(),
-        )
+        if callback.message and hasattr(callback.message, "edit_text"):
+            await callback.message.edit_text(
+                "Произошла ошибка при загрузке информации о розыгрыше. Попробуйте позже.",
+                reply_markup=get_main_menu_keyboard(),
+            )
         await callback.answer()
 
 
@@ -132,39 +134,43 @@ async def callback_lottery_history(callback: CallbackQuery, session: AsyncSessio
         builder.button(text="Назад в меню", callback_data="main_menu")
         builder.adjust(1)
 
-        await callback.message.edit_text(
-            text, reply_markup=builder.as_markup(), parse_mode="HTML"
-        )
+        if callback.message and hasattr(callback.message, "edit_text"):
+            await callback.message.edit_text(
+                text, reply_markup=builder.as_markup(), parse_mode="HTML"
+            )
         await callback.answer()
 
     except Exception as e:
         logger.error(f"Ошибка при показе истории розыгрышей: {str(e)}")
-        await callback.message.edit_text(
-            "Произошла ошибка при загрузке истории. Попробуйте позже.",
-            reply_markup=get_main_menu_keyboard(),
-        )
+        if callback.message and hasattr(callback.message, "edit_text"):
+            await callback.message.edit_text(
+                "Произошла ошибка при загрузке истории. Попробуйте позже.",
+                reply_markup=get_main_menu_keyboard(),
+            )
         await callback.answer()
+
+
 class ContactLotteryState(StatesGroup):
     waiting_for_contact = State()
+
 
 @router.callback_query(lambda c: c.data and c.data.startswith("send_contact"))
 async def callback_send_contact(callback: CallbackQuery, state: FSMContext):
     """Обрабатывает нажатие кнопки отправки контакта"""
     await callback.answer()
     # Убираем кнопку, чтобы не нажимали повторно
-    try:
-        await callback.message.edit_reply_markup(None)
-    except Exception:
-        pass
-    # Просим пользователя прислать контакт текстом
-    await callback.message.answer(
-        "📲 Пожалуйста, введите номер вашего телефона удобным для вас способом (текстом)."
-    )
+    if callback.message and hasattr(callback.message, "edit_reply_markup"):
+        try:
+            await callback.message.edit_reply_markup(None)
+        except Exception:
+            pass
+        # Просим пользователя прислать контакт текстом
+        if hasattr(callback.message, "answer"):
+            await callback.message.answer(
+                "📲 Пожалуйста, введите номер вашего телефона удобным для вас способом (текстом)."
+            )
     # Устанавливаем состояние ожидания контакта
     await state.set_state(ContactLotteryState.waiting_for_contact)
-
-
-
 
 
 @router.message(ContactLotteryState.waiting_for_contact)
@@ -174,6 +180,11 @@ async def handle_winner_contact(
     """
     Обрабатывает получение контактных данных от победителя еженедельного розыгрыша
     """
+    # Проверяем, что пользователь существует
+    if not message.from_user:
+        await state.clear()
+        return
+
     # Ищем последнюю лотерею для этого пользователя без контакта
     result = await session.execute(
         select(WeeklyLottery)
@@ -188,9 +199,21 @@ async def handle_winner_contact(
     )
     lottery = result.scalars().first()
     if lottery:
-        lottery.contact_info = message.text
-        lottery.contact_sent = True
+        # Обновляем контактную информацию
+        await session.execute(
+            WeeklyLottery.__table__.update()
+            .where(WeeklyLottery.id == lottery.id)
+            .values(contact_info=message.text, contact_sent=True)
+        )
         await session.commit()
         await message.answer(
             "Спасибо! Ваш контакт получен. Ожидайте, менеджер свяжется с вами."
         )
+    await state.clear()
+
+
+def register_weekly_lottery_handlers() -> Router:
+    """
+    Регистрирует хендлеры еженедельного розыгрыша и возвращает роутер
+    """
+    return router

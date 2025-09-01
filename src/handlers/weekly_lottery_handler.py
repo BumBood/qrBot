@@ -144,8 +144,11 @@ async def callback_lottery_history(callback: CallbackQuery, session: AsyncSessio
             reply_markup=get_main_menu_keyboard(),
         )
         await callback.answer()
+
+
 class ContactLotteryState(StatesGroup):
     waiting_for_contact = State()
+
 
 @router.callback_query(lambda c: c.data and c.data.startswith("send_contact"))
 async def callback_send_contact(callback: CallbackQuery, state: FSMContext):
@@ -162,9 +165,6 @@ async def callback_send_contact(callback: CallbackQuery, state: FSMContext):
     )
     # Устанавливаем состояние ожидания контакта
     await state.set_state(ContactLotteryState.waiting_for_contact)
-
-
-
 
 
 @router.message(ContactLotteryState.waiting_for_contact)

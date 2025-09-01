@@ -49,6 +49,9 @@
     <form action="/admin/lotteries/{{ l.id }}/reroll" method="post" style="display:inline-block; margin-left:5px;">
       <button type="submit" class="btn btn-sm btn-warning">Переиграть</button>
     </form>
+    <button type="button" class="btn btn-sm btn-info" style="margin-left:5px;" data-bs-toggle="modal" data-bs-target="#manualWinnerModal" data-lottery-id="{{ l.id }}">
+      Выбрать победителя
+    </button>
     {% else %}
     Подтверждено
     {% endif %}
@@ -61,4 +64,60 @@
 </tbody>
 </table>
 </div>
+
+<!-- Модальное окно для ручного выбора победителя -->
+<div class="modal fade" id="manualWinnerModal" tabindex="-1" aria-labelledby="manualWinnerModalLabel" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="manualWinnerModalLabel">Выбрать победителя вручную</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Закрыть"></button>
+      </div>
+      <form id="manualWinnerForm" method="post">
+        <div class="modal-body">
+          <div class="mb-3">
+            <label for="receiptId" class="form-label">Номер чека</label>
+            <input type="number" class="form-control" id="receiptId" name="receipt_id" required 
+                   placeholder="Введите ID чека" min="1">
+            <div class="form-text">Укажите ID чека, который должен выиграть в розыгрыше</div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+          <button type="submit" class="btn btn-primary">Выбрать победителя</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<script>
+// JavaScript для настройки модального окна
+document.addEventListener('DOMContentLoaded', function() {
+    var manualWinnerModal = document.getElementById('manualWinnerModal');
+    var manualWinnerForm = document.getElementById('manualWinnerForm');
+    
+    manualWinnerModal.addEventListener('show.bs.modal', function (event) {
+        // Кнопка, которая открыла модальное окно
+        var button = event.relatedTarget;
+        // Извлекаем lottery_id из data атрибута кнопки
+        var lotteryId = button.getAttribute('data-lottery-id');
+        
+        // Устанавливаем action формы
+        manualWinnerForm.setAttribute('action', '/admin/lotteries/' + lotteryId + '/select_winner');
+        
+        // Очищаем поле ввода
+        document.getElementById('receiptId').value = '';
+    });
+});
+</script>
+
+{% if message %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        alert('{{ message }}');
+    });
+</script>
+{% endif %}
+
 {% endblock %} 

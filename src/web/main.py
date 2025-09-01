@@ -307,6 +307,7 @@ async def list_prizes(
 async def list_lotteries(
     request: Request,
     current_admin: AdminUser = Depends(get_current_admin),
+    message: str = None,
     session: AsyncSession = Depends(get_db),
 ):
     from models.weekly_lottery_model import WeeklyLottery
@@ -316,7 +317,8 @@ async def list_lotteries(
     )
     lotteries = result.scalars().all()
     return templates.TemplateResponse(
-        "lotteries.html", {"request": request, "lotteries": lotteries}
+        "lotteries.html",
+        {"request": request, "lotteries": lotteries, "message": message},
     )
 
 
@@ -557,6 +559,28 @@ async def reroll_weekly_lottery(
     lottery.winner_user_id = winner_receipt.user_id
     await session.commit()
     return RedirectResponse(url="/admin/lotteries", status_code=303)
+
+
+@app.post("/admin/lotteries/{lottery_id}/select_winner")
+async def select_manual_winner(
+    lottery_id: int,
+    receipt_id: int = Form(...),
+    current_admin: AdminUser = Depends(get_current_admin),
+    session: AsyncSession = Depends(get_db),
+):
+    """Ручной выбор победителя розыгрыша по номеру чека"""
+    from services.weekly_lottery_service import WeeklyLotteryService
+
+    result = await WeeklyLotteryService.manual_select_winner(
+        session, lottery_id, receipt_id
+    )
+
+    if result["success"]:
+        message = result["message"]
+    else:
+        message = result["error"]
+
+    return RedirectResponse(url=f"/admin/lotteries?message={message}", status_code=303)
 
 
 @app.post("/admin/lotteries/{lottery_id}/delete")

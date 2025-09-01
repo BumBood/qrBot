@@ -299,6 +299,88 @@ class WeeklyLotteryService:
             return False
 
     @staticmethod
+    async def manual_select_winner(
+        session: AsyncSession, lottery_id: int, receipt_id: int
+    ) -> Dict[str, Any]:
+        """
+        Ручной выбор победителя розыгрыша
+
+        Args:
+            session: Сессия базы данных
+            lottery_id: ID розыгрыша
+            receipt_id: ID выбранного чека
+
+        Returns:
+            Dict[str, Any]: Результат операции
+        """
+        try:
+            # Получаем розыгрыш
+            lottery = await session.get(WeeklyLottery, lottery_id)
+            if not lottery:
+                return {
+                    "success": False,
+                    "error": f"Розыгрыш с ID {lottery_id} не найден",
+                }
+
+            # Проверяем, что розыгрыш ещё не подтверждён
+            if lottery.notification_sent:
+                return {
+                    "success": False,
+                    "error": "Нельзя изменить победителя после подтверждения розыгрыша",
+                }
+
+            # Получаем выбранный чек
+            receipt = await session.get(Receipt, receipt_id)
+            if not receipt:
+                return {"success": False, "error": f"Чек с ID {receipt_id} не найден"}
+
+            # Проверяем, что чек подходит для этой недели
+            if not (lottery.week_start <= receipt.created_at <= lottery.week_end):
+                return {
+                    "success": False,
+                    "error": f"Чек #{receipt_id} не относится к неделе розыгрыша",
+                }
+
+            # Проверяем, что чек подтверждён и содержит товары Айсида
+            if receipt.status != "verified" or receipt.items_count == 0:
+                return {
+                    "success": False,
+                    "error": f"Чек #{receipt_id} не подходит для розыгрыша (не подтверждён или нет товаров Айсида)",
+                }
+
+            # Обновляем победителя
+            lottery.winner_user_id = receipt.user_id
+            lottery.winner_receipt_id = receipt.id
+            await session.commit()
+
+            logger.info(
+                f"Ручной выбор победителя: розыгрыш {lottery_id}, "
+                f"новый победитель - пользователь {receipt.user_id}, чек {receipt.id}"
+            )
+
+            return {
+                "success": True,
+                "message": f"Победитель изменён на пользователя #{receipt.user_id}, чек #{receipt.id}",
+                "winner": {
+                    "user_id": receipt.user_id,
+                    "receipt_id": receipt.id,
+                    "lottery_id": lottery.id,
+                },
+            }
+
+        except Exception as e:
+            logger.error(f"Ошибка при ручном выборе победителя: {str(e)}")
+            try:
+                await session.rollback()
+            except Exception:
+                pass
+
+            return {
+                "success": False,
+                "error": f"Ошибка при выборе победителя: {str(e)}",
+            }
+
+    @staticmethod
     async def get_lottery_history(
         session: AsyncSession, limit: int = 10
     ) -> list[WeeklyLottery]:

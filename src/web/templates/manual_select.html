@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block content %}
+<h1 class="mb-4">Выбор чека для розыгрыша вручную</h1>
+
+<div class="mb-4">
+  <div class="card">
+    <div class="card-body">
+      <h5 class="card-title">Информация о розыгрыше</h5>
+      <p class="card-text">
+        <strong>Неделя:</strong> {{ lottery.week_start.strftime('%d.%m.%Y') }} - {{ lottery.week_end.strftime('%d.%m.%Y') }}<br>
+        <strong>Текущий победитель:</strong>
+        {% if lottery.winner_user_id %}
+          Пользователь #{{ lottery.winner_user_id }}, чек №{{ lottery.winner_receipt_id }}
+        {% else %}
+          Не выбран
+        {% endif %}<br>
+        <strong>Количество участников:</strong> {{ eligible_receipts|length }}
+      </p>
+    </div>
+  </div>
+</div>
+
+{% if eligible_receipts %}
+<div class="table-responsive">
+  <table class="table table-striped table-bordered">
+    <thead>
+      <tr>
+        <th>ID чека</th>
+        <th>Пользователь</th>
+        <th>Имя пользователя</th>
+        <th>Сумма чека</th>
+        <th>Дата регистрации</th>
+        <th>Количество товаров Айсида</th>
+        <th>Действие</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for receipt in eligible_receipts %}
+      <tr>
+        <td>{{ receipt.id }}</td>
+        <td>#{{ receipt.user.id }}</td>
+        <td>
+          {% if receipt.user.username %}
+            @{{ receipt.user.username }}
+          {% else %}
+            {{ receipt.user.full_name or 'Не указано' }}
+          {% endif %}
+        </td>
+        <td>{{ receipt.amount }} руб.</td>
+        <td>{{ receipt.created_at.strftime('%d.%m.%Y %H:%M') }}</td>
+        <td>{{ receipt.items_count }}</td>
+        <td>
+          <form action="/admin/lotteries/{{ lottery.id }}/manual_select" method="post" style="display:inline-block;">
+            <input type="hidden" name="receipt_id" value="{{ receipt.id }}">
+            <button type="submit" class="btn btn-sm btn-success"
+                    onclick="return confirm('Вы уверены, что хотите выбрать этот чек победителем?')">
+              Выбрать победителем
+            </button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="alert alert-warning">
+  <h4>Нет подходящих чеков</h4>
+  <p>За выбранную неделю нет подтверждённых чеков с товарами «Айсида».</p>
+</div>
+{% endif %}
+
+<div class="mt-4">
+  <a href="/admin/lotteries" class="btn btn-secondary">Назад к розыгрышам</a>
+</div>
+{% endblock %}

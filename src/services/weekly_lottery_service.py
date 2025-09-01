@@ -334,19 +334,8 @@ class WeeklyLotteryService:
             if not receipt:
                 return {"success": False, "error": f"Чек с ID {receipt_id} не найден"}
 
-            # Проверяем, что чек подходит для этой недели
-            if not (lottery.week_start <= receipt.created_at <= lottery.week_end):
-                return {
-                    "success": False,
-                    "error": f"Чек #{receipt_id} не относится к неделе розыгрыша",
-                }
-
-            # Проверяем, что чек подтверждён и содержит товары Айсида
-            if receipt.status != "verified" or receipt.items_count == 0:
-                return {
-                    "success": False,
-                    "error": f"Чек #{receipt_id} не подходит для розыгрыша (не подтверждён или нет товаров Айсида)",
-                }
+            # При ручном выборе разрешаем выбирать любой существующий чек
+            # без проверок на статус, товары Айсида или принадлежность к неделе
 
             # Обновляем победителя
             lottery.winner_user_id = receipt.user_id

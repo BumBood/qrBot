@@ -1,5 +1,5 @@
 from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery, FSInputFile
+from aiogram.types import CopyTextButton, Message, CallbackQuery, FSInputFile
 from aiogram.filters import Command
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -32,7 +32,7 @@ def get_start_keyboard():
     Создает клавиатуру для команды /start
     """
     builder = InlineKeyboardBuilder()
-    builder.button(text="Скопировать ПРОМОКОД", copy_text="ZABOTA250")
+    builder.button(text="Скопировать ПРОМОКОД", copy_text=CopyTextButton(text="ZABOTA250"))
     builder.button(text="Зарегистрировать покупку", callback_data="register_receipt")
     builder.button(text="Меню", callback_data="main_menu")
     builder.adjust(1)

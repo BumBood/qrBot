@@ -25,7 +25,9 @@ from models.admin_model import AdminUser
 from pathlib import Path
 from sqlalchemy import delete as sa_delete
 from aiogram import Bot
-from aiogram.types import FSInputFile
+from aiogram.types import FSInputFile, LinkPreviewOptions
+from aiogram.client.default import DefaultBotProperties
+from aiogram.enums import ParseMode
 from config import BOT_TOKEN
 
 
@@ -466,7 +468,7 @@ async def confirm_weekly_lottery(
         return RedirectResponse(url="/admin/lotteries", status_code=303)
 
     # Отправляем уведомления победителю и участникам
-    bot = Bot(token=str(BOT_TOKEN))
+    bot = Bot(token=str(BOT_TOKEN), default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     async with bot:
         # Если есть победитель: запрашиваем контактные данные
         if lottery.winner_user_id:
@@ -759,7 +761,7 @@ async def send_broadcast(
             saved_paths.append(dst)
 
     # Отправка
-    bot = Bot(token=str(BOT_TOKEN), parse_mode="HTML")
+    bot = Bot(token=str(BOT_TOKEN), default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     sent = 0
     failed = 0
     async with bot:
@@ -782,7 +784,11 @@ async def send_broadcast(
                             )
                             first = False
                 else:
-                    await bot.send_message(uid, html_text, disable_web_page_preview=disable_preview)
+                    await bot.send_message(
+                        uid,
+                        html_text,
+                        link_preview=LinkPreviewOptions(is_disabled=True) if disable_preview else None,
+                    )
                 sent += 1
             except Exception:
                 failed += 1

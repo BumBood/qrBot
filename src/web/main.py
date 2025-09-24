@@ -25,7 +25,7 @@ from models.admin_model import AdminUser
 from pathlib import Path
 from sqlalchemy import delete as sa_delete
 from aiogram import Bot
-from aiogram.types import FSInputFile, LinkPreviewOptions
+from aiogram.types import FSInputFile, LinkPreviewOptions, InputMediaPhoto
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from config import BOT_TOKEN
@@ -781,7 +781,7 @@ async def send_broadcast(
     failed = 0
     errors: list[str] = []
     async with bot:
-        # Если несколько изображений — отправим альбом по одному пользователю
+        # Если несколько изображений — отправим через media group
         for uid in target_ids:
             try:
                 if saved_paths:
@@ -789,16 +789,14 @@ async def send_broadcast(
                         photo = FSInputFile(str(saved_paths[0]))
                         await bot.send_photo(uid, photo=photo, caption=html_text)
                     else:
-                        # Telegram требует медиа-группы; упростим: отправим первое фото с подписью, остальные без подписи
-                        first = True
-                        for p in saved_paths:
-                            photo = FSInputFile(str(p))
-                            await bot.send_photo(
-                                uid,
-                                photo=photo,
-                                caption=html_text if first else None,
-                            )
-                            first = False
+                        media = []
+                        for idx, p in enumerate(saved_paths):
+                            file = FSInputFile(str(p))
+                            if idx == 0 and html_text:
+                                media.append(InputMediaPhoto(media=file, caption=html_text))
+                            else:
+                                media.append(InputMediaPhoto(media=file))
+                        await bot.send_media_group(uid, media=media)
                 else:
                     await bot.send_message(
                         uid,

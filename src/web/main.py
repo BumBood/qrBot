@@ -756,24 +756,23 @@ async def send_broadcast(
     # Сохраняем изображения (если есть)
     saved_paths = []
     for f in image_files:
-        if isinstance(f, UploadFile):
-            try:
-                filename = f.filename or "image.jpg"
-                safe_name = filename.replace("..", "_")
-                dst = BROADCAST_UPLOAD_DIR / safe_name
-                # если имя занято — добавим суффикс
-                counter = 1
-                while dst.exists():
-                    stem = dst.stem
-                    suffix = dst.suffix
-                    dst = BROADCAST_UPLOAD_DIR / f"{stem}_{counter}{suffix}"
-                    counter += 1
-                content = await f.read()
-                with open(dst, "wb") as out:
-                    out.write(content)
-                saved_paths.append(dst)
-            except Exception as e:
-                logger.error(f"Ошибка сохранения файла '{getattr(f, 'filename', None)}': {e}")
+        try:
+            filename = getattr(f, "filename", None) or "image.jpg"
+            safe_name = str(filename).replace("..", "_")
+            dst = BROADCAST_UPLOAD_DIR / safe_name
+            # если имя занято — добавим суффикс
+            counter = 1
+            while dst.exists():
+                stem = dst.stem
+                suffix = dst.suffix
+                dst = BROADCAST_UPLOAD_DIR / f"{stem}_{counter}{suffix}"
+                counter += 1
+            content = await f.read()
+            with open(dst, "wb") as out:
+                out.write(content)
+            saved_paths.append(dst)
+        except Exception as e:
+            logger.error(f"Ошибка сохранения файла '{getattr(f, 'filename', None)}': {e}")
 
     # Отправка
     bot = Bot(token=str(BOT_TOKEN), default=DefaultBotProperties(parse_mode=ParseMode.HTML))

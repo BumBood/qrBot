@@ -29,6 +29,7 @@ from aiogram.types import FSInputFile, LinkPreviewOptions
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from config import BOT_TOKEN
+from logger import logger
 
 
 app = FastAPI()
@@ -719,7 +720,12 @@ async def send_broadcast(
     from sqlalchemy import select as sa_select
 
     # Получаем файлы изображений из запроса вручную, так как их может быть несколько
-    form = await request.form()
+    try:
+        form = await request.form()
+    except Exception as e:
+        err = f"Ошибка разбора формы: {e}"
+        logger.error(err)
+        return RedirectResponse(url=f"/admin/broadcasts?message={err}", status_code=303)
     image_files = form.getlist("images") if "images" in form else []
     disable_preview = form.get("disable_preview") == "1"
 
@@ -739,31 +745,41 @@ async def send_broadcast(
                 try:
                     target_ids.append(int(raw))
                 except ValueError:
-                    pass
+                    logger.warning(f"Пропускаю некорректный user_id: '{raw}'")
+
+    if not target_ids:
+        return RedirectResponse(
+            url="/admin/broadcasts?message=Не выбран(а) аудитория/пользователи",
+            status_code=303,
+        )
 
     # Сохраняем изображения (если есть)
     saved_paths = []
     for f in image_files:
         if isinstance(f, UploadFile):
-            filename = f.filename or "image.jpg"
-            safe_name = filename.replace("..", "_")
-            dst = BROADCAST_UPLOAD_DIR / safe_name
-            # если имя занято — добавим суффикс
-            counter = 1
-            while dst.exists():
-                stem = dst.stem
-                suffix = dst.suffix
-                dst = BROADCAST_UPLOAD_DIR / f"{stem}_{counter}{suffix}"
-                counter += 1
-            content = await f.read()
-            with open(dst, "wb") as out:
-                out.write(content)
-            saved_paths.append(dst)
+            try:
+                filename = f.filename or "image.jpg"
+                safe_name = filename.replace("..", "_")
+                dst = BROADCAST_UPLOAD_DIR / safe_name
+                # если имя занято — добавим суффикс
+                counter = 1
+                while dst.exists():
+                    stem = dst.stem
+                    suffix = dst.suffix
+                    dst = BROADCAST_UPLOAD_DIR / f"{stem}_{counter}{suffix}"
+                    counter += 1
+                content = await f.read()
+                with open(dst, "wb") as out:
+                    out.write(content)
+                saved_paths.append(dst)
+            except Exception as e:
+                logger.error(f"Ошибка сохранения файла '{getattr(f, 'filename', None)}': {e}")
 
     # Отправка
     bot = Bot(token=str(BOT_TOKEN), default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     sent = 0
     failed = 0
+    errors: list[str] = []
     async with bot:
         # Если несколько изображений — отправим альбом по одному пользователю
         for uid in target_ids:
@@ -787,11 +803,18 @@ async def send_broadcast(
                     await bot.send_message(
                         uid,
                         html_text,
-                        link_preview=LinkPreviewOptions(is_disabled=True) if disable_preview else None,
+                        link_preview_options=LinkPreviewOptions(is_disabled=True) if disable_preview else None,
                     )
                 sent += 1
-            except Exception:
+            except Exception as e:
                 failed += 1
+                err_text = f"uid={uid}: {e.__class__.__name__}: {e}"
+                errors.append(err_text)
+                logger.error(f"Ошибка отправки рассылки {err_text}")
 
-    msg = f"Рассылка завершена. Успешно: {sent}, ошибок: {failed}"
+    details = ""
+    if errors:
+        preview = " | ".join(errors[:3])
+        details = f"; детали: {preview}"
+    msg = f"Рассылка завершена. Успешно: {sent}, ошибок: {failed}{details}"
     return RedirectResponse(url=f"/admin/broadcasts?message={msg}", status_code=303)

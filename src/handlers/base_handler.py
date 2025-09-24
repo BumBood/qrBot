@@ -24,8 +24,6 @@ def get_main_menu_keyboard():
     builder.adjust(1)  # По одной кнопке в ряду
     return builder.as_markup()
 
-    text_to_copy = "ZABOTA250"
-
 
 def get_start_keyboard():
     """

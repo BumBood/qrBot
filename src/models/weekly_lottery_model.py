@@ -20,17 +20,11 @@ class WeeklyLottery(Base):
     id = Column(Integer, primary_key=True)  # ID розыгрыша
     week_start = Column(DateTime, nullable=False)  # Начало недели (понедельник 00:00)
     week_end = Column(DateTime, nullable=False)  # Конец недели (воскресенье 23:59)
-    winner_user_id = Column(
-        BigInteger, ForeignKey("users.id"), nullable=True
-    )  # ID победителя
-    winner_receipt_id = Column(
-        Integer, ForeignKey("receipts.id"), nullable=True
-    )  # ID выигрышного чека
+    winner_user_id = Column(BigInteger, ForeignKey("users.id"), nullable=True)  # ID победителя
+    winner_receipt_id = Column(Integer, ForeignKey("receipts.id"), nullable=True)  # ID выигрышного чека
     prize_amount = Column(Integer, default=5000)  # Размер приза в рублях
     contact_info = Column(String(100), default="")  # Контакт для связи
-    contact_sent = Column(
-        Boolean, default=False
-    )  # Статус: пользователь отправил контакт или нет
+    contact_sent = Column(Boolean, default=False)  # Статус: пользователь отправил контакт или нет
     conducted_at = Column(DateTime, nullable=True)  # Дата проведения розыгрыша
     notification_sent = Column(Boolean, default=False)  # Отправлено ли уведомление
     created_at = Column(DateTime, server_default=func.now())  # Дата создания записи

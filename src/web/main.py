@@ -1,6 +1,6 @@
 import os
 import datetime
-from fastapi import FastAPI, Depends, Request, Form
+from fastapi import FastAPI, Depends, Request, Form, UploadFile, File
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from database import async_session
@@ -24,12 +24,18 @@ from fastapi import HTTPException, status
 from models.admin_model import AdminUser
 from pathlib import Path
 from sqlalchemy import delete as sa_delete
+from aiogram import Bot
+from aiogram.types import FSInputFile
+from config import BOT_TOKEN
 
 
 app = FastAPI()
 app.add_middleware(SessionMiddleware, secret_key="CHANGE_THIS_SECRET_KEY")
 BASE_DIR = os.path.dirname(__file__)
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
+
+BROADCAST_UPLOAD_DIR = Path(__file__).resolve().parents[2] / "data" / "pics" / "broadcasts"
+BROADCAST_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -46,9 +52,7 @@ async def get_current_admin(request: Request) -> AdminUser:
     """Получает текущего аутентифицированного админа из сессии"""
     admin_id = request.session.get("admin_id")
     if not admin_id:
-        raise HTTPException(
-            status_code=status.HTTP_302_FOUND, headers={"Location": "/admin/login"}
-        )
+        raise HTTPException(status_code=status.HTTP_302_FOUND, headers={"Location": "/admin/login"})
     # Создаем новую сессию для получения админа
     async with async_session() as session:
         admin = await session.get(AdminUser, admin_id)
@@ -124,9 +128,7 @@ async def receipt_detail(
     session: AsyncSession = Depends(get_db),
 ):
     receipt = await session.get(Receipt, receipt_id)
-    return templates.TemplateResponse(
-        "receipt_detail.html", {"request": request, "receipt": receipt}
-    )
+    return templates.TemplateResponse("receipt_detail.html", {"request": request, "receipt": receipt})
 
 
 @app.get("/admin/lottery", response_class=HTMLResponse)
@@ -156,9 +158,7 @@ async def run_weekly_lottery(
     current_admin: AdminUser = Depends(get_current_admin),
     session: AsyncSession = Depends(get_db),
 ):
-    result = await WeeklyLotteryService.conduct_lottery(
-        session, for_current_week=(period == "current")
-    )
+    result = await WeeklyLotteryService.conduct_lottery(session, for_current_week=(period == "current"))
     if result["success"]:
         if result.get("winner"):
             w = result["winner"]
@@ -242,14 +242,10 @@ async def login(
     password: str = Form(...),
     session: AsyncSession = Depends(get_db),
 ):
-    result = await session.execute(
-        select(AdminUser).where(AdminUser.username == username)
-    )
+    result = await session.execute(select(AdminUser).where(AdminUser.username == username))
     admin = result.scalars().first()
     if not admin or not verify_password(password, admin.password_hash):
-        return templates.TemplateResponse(
-            "login.html", {"request": request, "error": "Неверные логин или пароль"}
-        )
+        return templates.TemplateResponse("login.html", {"request": request, "error": "Неверные логин или пароль"})
     request.session["admin_id"] = admin.id
     return RedirectResponse(url="/admin/receipts", status_code=303)
 
@@ -268,9 +264,7 @@ async def list_admins(
 ):
     result = await session.execute(select(AdminUser))
     admins = result.scalars().all()
-    return templates.TemplateResponse(
-        "admins.html", {"request": request, "admins": admins}
-    )
+    return templates.TemplateResponse("admins.html", {"request": request, "admins": admins})
 
 
 @app.post("/admin/admins")
@@ -298,9 +292,7 @@ async def list_prizes(
 
     result = await session.execute(select(Prize).order_by(Prize.issued_at.desc()))
     prizes = result.scalars().all()
-    return templates.TemplateResponse(
-        "prizes.html", {"request": request, "prizes": prizes}
-    )
+    return templates.TemplateResponse("prizes.html", {"request": request, "prizes": prizes})
 
 
 @app.get("/admin/lotteries", response_class=HTMLResponse)
@@ -312,9 +304,7 @@ async def list_lotteries(
 ):
     from models.weekly_lottery_model import WeeklyLottery
 
-    result = await session.execute(
-        select(WeeklyLottery).order_by(WeeklyLottery.created_at.desc())
-    )
+    result = await session.execute(select(WeeklyLottery).order_by(WeeklyLottery.created_at.desc()))
     lotteries = result.scalars().all()
     return templates.TemplateResponse(
         "lotteries.html",
@@ -338,15 +328,9 @@ async def list_promocodes(
     stats = await promocode_service.get_promocodes_stats(session)
 
     # Парсим фильтры
-    discount_filter = (
-        int(discount_amount) if discount_amount and discount_amount.isdigit() else None
-    )
-    used_filter = (
-        is_used == "true" if is_used else (False if is_used == "false" else None)
-    )
-    active_filter = (
-        is_active == "true" if is_active else (False if is_active == "false" else None)
-    )
+    discount_filter = int(discount_amount) if discount_amount and discount_amount.isdigit() else None
+    used_filter = is_used == "true" if is_used else (False if is_used == "false" else None)
+    active_filter = is_active == "true" if is_active else (False if is_active == "false" else None)
 
     # Получаем список промокодов с фильтрацией
     promocodes = await promocode_service.get_promocodes_list(
@@ -393,9 +377,7 @@ async def add_promocodes(
         )
 
     # Добавляем промокоды через сервис
-    result = await promocode_service.add_promocodes(
-        session, codes_list, discount_amount
-    )
+    result = await promocode_service.add_promocodes(session, codes_list, discount_amount)
 
     if result["success"]:
         message = f"Добавлено {result['added_count']} промокодов, пропущено {result['skipped_count']}"
@@ -484,7 +466,7 @@ async def confirm_weekly_lottery(
         return RedirectResponse(url="/admin/lotteries", status_code=303)
 
     # Отправляем уведомления победителю и участникам
-    bot = Bot(token=BOT_TOKEN)
+    bot = Bot(token=str(BOT_TOKEN))
     async with bot:
         # Если есть победитель: запрашиваем контактные данные
         if lottery.winner_user_id:
@@ -499,22 +481,14 @@ async def confirm_weekly_lottery(
         # Формируем текст для участников
         if lottery.winner_user_id:
             winner_user = await session.get(User, lottery.winner_user_id)
-            winner_mention = (
-                f"(@{winner_user.username})"
-                if winner_user and winner_user.username
-                else ""
-            )
+            winner_mention = f"(@{winner_user.username})" if winner_user and winner_user.username else ""
             participant_caption = (
                 "Розыгрыш завершён!\n"
                 f"Победитель: чек № {lottery.winner_receipt_id} {winner_mention}.\n"
                 "Спасибо за участие! Оставайтесь с «Айсида»"
             )
         else:
-            participant_caption = (
-                "Розыгрыш завершён!\n"
-                "Участников не было.\n"
-                "Спасибо за участие! Оставайтесь с «Айсида»"
-            )
+            participant_caption = "Розыгрыш завершён!\nУчастников не было.\nСпасибо за участие! Оставайтесь с «Айсида»"
         for user in all_users:
             # Не отправляем победителю повторно
             if lottery.winner_user_id and user.id == lottery.winner_user_id:
@@ -547,9 +521,7 @@ async def reroll_weekly_lottery(
         return RedirectResponse(url="/admin/lotteries", status_code=303)
 
     # Получаем подходящие чеки недели, исключаем текущий
-    receipts = await WeeklyLotteryService.get_eligible_receipts(
-        session, lottery.week_start, lottery.week_end
-    )
+    receipts = await WeeklyLotteryService.get_eligible_receipts(session, lottery.week_start, lottery.week_end)
     candidates = [r for r in receipts if r.id != lottery.winner_receipt_id]
     if not candidates:
         return RedirectResponse(url="/admin/lotteries", status_code=303)
@@ -571,9 +543,7 @@ async def select_manual_winner(
     """Ручной выбор победителя розыгрыша по номеру чека"""
     from services.weekly_lottery_service import WeeklyLotteryService
 
-    result = await WeeklyLotteryService.manual_select_winner(
-        session, lottery_id, receipt_id
-    )
+    result = await WeeklyLotteryService.manual_select_winner(session, lottery_id, receipt_id)
 
     if result["success"]:
         message = result["message"]
@@ -593,9 +563,7 @@ async def delete_weekly_lottery(
     from sqlalchemy import delete as sa_delete
 
     # Удаляем запись через SQL-запрос
-    await session.execute(
-        sa_delete(WeeklyLottery).where(WeeklyLottery.id == lottery_id)
-    )
+    await session.execute(sa_delete(WeeklyLottery).where(WeeklyLottery.id == lottery_id))
     await session.commit()
     return RedirectResponse(url="/admin/lotteries", status_code=303)
 
@@ -677,9 +645,7 @@ async def save_google_sheets(
         message = "Настройки Google Sheets сохранены"
     except Exception as e:
         message = f"Ошибка сохранения настроек: {str(e)}"
-    return RedirectResponse(
-        url=f"/admin/google_sheets?message={message}", status_code=303
-    )
+    return RedirectResponse(url=f"/admin/google_sheets?message={message}", status_code=303)
 
 
 @app.get("/admin/google_sheets/test")
@@ -725,3 +691,101 @@ async def delete_receipt(
     except Exception as e:
         message = f"Ошибка удаления чека #{receipt_id}: {str(e)}"
     return RedirectResponse(url=f"/admin/receipts?message={message}", status_code=303)
+
+
+# -------------------- Рассылка --------------------
+@app.get("/admin/broadcasts", response_class=HTMLResponse)
+async def broadcasts_page(
+    request: Request,
+    current_admin: AdminUser = Depends(get_current_admin),
+    message: str = None,
+):
+    return templates.TemplateResponse("broadcasts.html", {"request": request, "message": message})
+
+
+@app.post("/admin/broadcasts/send")
+async def send_broadcast(
+    request: Request, html_text: str = Form(...), audience: str = Form("all"), user_ids: str = Form("")
+):
+    """Отправка рассылки всем или выбранным пользователям.
+
+    - html_text: HTML форматированный текст (parse_mode=HTML)
+    - audience: all | specific
+    - user_ids: "1,2,3" (если audience=specific)
+    - images: multiple files
+    """
+    from sqlalchemy import select as sa_select
+
+    # Получаем файлы изображений из запроса вручную, так как их может быть несколько
+    form = await request.form()
+    image_files = form.getlist("images") if "images" in form else []
+    disable_preview = form.get("disable_preview") == "1"
+
+    # Список целевых user_id
+    target_ids = []
+    async with async_session() as session:
+        if audience == "all":
+            result = await session.execute(sa_select(User))
+            users = result.scalars().all()
+            target_ids = [u.id for u in users]
+        else:
+            # Парсим из строки
+            for raw in (user_ids or "").split(","):
+                raw = raw.strip()
+                if not raw:
+                    continue
+                try:
+                    target_ids.append(int(raw))
+                except ValueError:
+                    pass
+
+    # Сохраняем изображения (если есть)
+    saved_paths = []
+    for f in image_files:
+        if isinstance(f, UploadFile):
+            filename = f.filename or "image.jpg"
+            safe_name = filename.replace("..", "_")
+            dst = BROADCAST_UPLOAD_DIR / safe_name
+            # если имя занято — добавим суффикс
+            counter = 1
+            while dst.exists():
+                stem = dst.stem
+                suffix = dst.suffix
+                dst = BROADCAST_UPLOAD_DIR / f"{stem}_{counter}{suffix}"
+                counter += 1
+            content = await f.read()
+            with open(dst, "wb") as out:
+                out.write(content)
+            saved_paths.append(dst)
+
+    # Отправка
+    bot = Bot(token=str(BOT_TOKEN), parse_mode="HTML")
+    sent = 0
+    failed = 0
+    async with bot:
+        # Если несколько изображений — отправим альбом по одному пользователю
+        for uid in target_ids:
+            try:
+                if saved_paths:
+                    if len(saved_paths) == 1:
+                        photo = FSInputFile(str(saved_paths[0]))
+                        await bot.send_photo(uid, photo=photo, caption=html_text)
+                    else:
+                        # Telegram требует медиа-группы; упростим: отправим первое фото с подписью, остальные без подписи
+                        first = True
+                        for p in saved_paths:
+                            photo = FSInputFile(str(p))
+                            await bot.send_photo(
+                                uid,
+                                photo=photo,
+                                caption=html_text if first else None,
+                            )
+                            first = False
+                else:
+                    await bot.send_message(uid, html_text, disable_web_page_preview=disable_preview)
+                sent += 1
+            except Exception:
+                failed += 1
+
+    msg = f"Рассылка завершена. Успешно: {sent}, ошибок: {failed}"
+    return RedirectResponse(url=f"/admin/broadcasts?message={msg}", status_code=303)

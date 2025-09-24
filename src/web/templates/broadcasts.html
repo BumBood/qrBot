@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block content %}
+<h3>Рассылка</h3>
+
+{% if message %}
+<div class="alert alert-info">{{ message }}</div>
+{% endif %}
+
+<form action="/admin/broadcasts/send" method="post" enctype="multipart/form-data" class="mt-3">
+  <div class="mb-3">
+    <label for="audience" class="form-label">Аудитория</label>
+    <select class="form-select" id="audience" name="audience" required>
+      <option value="all" selected>Все пользователи</option>
+      <option value="specific">Конкретные пользователи (ID через запятую)</option>
+    </select>
+  </div>
+
+  <div class="mb-3" id="user_ids_wrap" style="display:none;">
+    <label for="user_ids" class="form-label">ID пользователей</label>
+    <input type="text" class="form-control" id="user_ids" name="user_ids" placeholder="123,456,789">
+    <div class="form-text">Укажите Telegram user_id через запятую.</div>
+  </div>
+
+  <div class="mb-3">
+    <label for="html_text" class="form-label">Текст (HTML разрешён)</label>
+    <textarea class="form-control" id="html_text" name="html_text" rows="6" placeholder="<b>Жирный</b>, <i>курсив</i>, <a href='https://example.com'>ссылка</a>" required></textarea>
+    <div class="form-text">Отправляется с parse_mode=HTML. Следите за корректными тегами.</div>
+  </div>
+
+  <div class="mb-3">
+    <label for="images" class="form-label">Картинки (необязательно)</label>
+    <input class="form-control" type="file" id="images" name="images" accept="image/*" multiple>
+    <div class="form-text">Можно прикрепить несколько изображений. Будут отправлены как альбом, если их больше одной.</div>
+  </div>
+
+  <div class="mb-3 form-check">
+    <input type="checkbox" class="form-check-input" id="disable_preview" name="disable_preview" value="1">
+    <label class="form-check-label" for="disable_preview">Отключить предпросмотр ссылок</label>
+  </div>
+
+  <button class="btn btn-primary" type="submit">Отправить рассылку</button>
+</form>
+
+<script>
+  const audience = document.getElementById('audience');
+  const wrap = document.getElementById('user_ids_wrap');
+  audience.addEventListener('change', function() {
+    wrap.style.display = (this.value === 'specific') ? 'block' : 'none';
+  });
+</script>
+{% endblock %}
+
+
